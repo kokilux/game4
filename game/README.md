@@ -1,0 +1,110 @@
+# KA — 夜の蚊取り
+
+> 蚊 × 睡眠。1晩45秒。**叩けるのは、蚊が着地の直前に「止まる」一瞬だけ。**
+
+暗い寝室。耳元で羽音がする。蚊は壁・布団・そしてあなたの顔に着地する。
+着地の0.3秒前、蚊はホバリングして震える（＝予備動作）。そこが唯一の狙い目。
+飛んでいる最中に叩けば空振り、遅れれば刺される。
+
+```
+npm run dev          # http://localhost:5173/game/  (320x180 を整数倍で拡大)
+```
+
+- **操作**：マウス／指で手を動かす、タップ／Space で平手。`M` 無音、`P` 原則ラベルの表示切替、`R` タイトルへ
+- **ルール**：45秒で蚊を7匹。刺されると睡眠（♥3）が減り、0で夜が終わる
+- **得点**：捕獲 +100 / 着地から素早く叩く +50 / 連続ボーナス、残り♥ ×150、全滅 +500
+
+---
+
+## 12のアニメーション原則 → 実装
+
+| # | 原則 | この作品での実装 | コード |
+| --- | --- | --- | --- |
+| 1 | つぶれ・伸び | 手のひらが振りかぶりで縦に伸び、当たった瞬間に横に潰れる（sx 1.36 / sy 0.62）。当たった蚊は潰れて壁のシミになる | `hand.js slapPose`, `game.js drawSplat` |
+| 2 | 予備動作 | 蚊が着地の0.32秒前にホバリングして震える。手も打つ前に0.08秒引く（進行度 -0.3） | `mosquito.js state:"hover"`, `hand.js strikeProgress` |
+| 3 | ステージング | 光源は窓の月だけ。蚊は月明かりの帯か、着地したときだけ見える。当たりは全画面1フレームの白 | `scene.js inBeam`, `game.js flash` |
+| 4 | 順動作と位置動作 | 蚊＝手続き的な順動作（舵＋ゆらぎ）、手＝位置動作（ANTIC→STRIKE→HOLD→RECOVERのキーフレーム） | `mosquito.js`, `hand.js` |
+| 5 | フォロースルー・オーバーラップ | 叩いた後、手は行き過ぎてから戻る（wobble）。シミはにじみ、刺し跡はじわじわ腫れ、Zzzは遅れて流れる | `hand.js RECOVER`, `game.js marks` |
+| 6 | スローイン・スローアウト | 振りかぶりは easeOutCubic、打撃は easeInQuad（加速して当たる） | `draw.js`, `hand.js` |
+| 7 | 弧 | 手は狙いへ直線ではなく、進行方向に垂直な `bow` を足して弧を描く | `hand.js updateHand` |
+| 8 | 二次動作 | 呼吸で口と胸が動く、ホコリが光の帯を漂う、羽音の波紋、蚊の羽ばたきブラー | `scene.js drawSleeper / drawAmbient`, `mosquito.js` |
+| 9 | タイミング | 当たった瞬間に世界を0.09秒止める（ヒットストップ）。着地の猶予は肌1.45秒／壁2.6秒 | `game.js hitStop`, `mosquito.js landTimer` |
+| 10 | 誇張 | 手は頭（24px）より大きい25×30px。白フラッシュ、"PACHI!" の文字、赤い腫れ | `hand.js`, `game.js popup` |
+| 11 | 確かな描画 | 320×180、固定パレット（月光の青＋肌の暖色）、1px輪郭、光源は右上で統一 | `palette.js`, `scene.js` |
+| 12 | アピール | 寝顔と寝癖、Zzz、蚊の小さな目、ハートの睡眠ゲージ、明け方の暖色 | `scene.js drawSleeper`, `game.js drawHud` |
+
+`P` キーで、いま効いている原則の名前が画面下に出る（`ANTICIPATION` / `TIMING` / `SQUASH & STRETCH` …）。
+実装の意図を遊びながら確認できる。
+
+---
+
+## 遊びの芯
+
+**「予備動作を読む」ことがそのまま攻略になる**ようにした。
+
+- 蚊は飛んでいる間ずっと手から逃げる（近づけると加速する）。だから「とりあえず連打」は通用しない
+- 着地の0.45秒前から羽音の音程が上がり、ホバリングで止まる。**音と見た目の両方**が予告になる
+- 叩けるのは `hover` と `land` の間だけ。判定は狙いの点から半径17px
+- 外すと0.3秒の硬直（＝手の戻り）だけが残り、蚊はさらに警戒して速くなる
+
+暗闇で見えないこと自体をゲームにしているので、代わりの手がかりを多重化した：
+月明かりの帯（見える）／羽音の距離と音程（聞こえる）／空気の波紋（うっすら見える）／肌の赤い腫れ（刺される前に見える）。
+
+---
+
+## 構成
+
+```
+game/
+  index.html          画面とタイトル（日本語はHTML側、ゲーム内はピクセルフォント）
+  src/
+    palette.js        色（月光の青／肌の暖色の2系統だけ）
+    scene.js          寝室の静的背景・寝顔・ホコリ・月明かりの帯
+    mosquito.js       蚊の状態機械（fly→approach→hover→land→escape）
+    hand.js           手のキーフレームと弧・つぶれ
+    fx.js             pixelfx の impact エフェクト接続
+    audio.js          WebAudio の羽音・平手・刺し跡（外部ファイルなし）
+    game.js           進行・判定・HUD・リザルト
+    main.js           入力・音・ループ（320x180 → 整数倍拡大）
+  tools/
+    preview.mjs       Node でフレームをPNGに（ブラウザ不要のQA）
+    sim-test.mjs      ロジックの回帰テスト
+    dom-test.mjs      最小DOMスタブで main.js を走らせる回帰テスト
+```
+
+### pixelfx との関係
+
+描画はすべて pixelfx の **フレーム（color + light の2バッファ）** に対して行い、
+最後に `composite()` で RGBA にする。おかげでブラウザなしでも同じ絵をPNGに焼ける。
+
+```bash
+cd vendor/pixelfx && node tools/render.mjs impacts/hit-spark   # 平手の火花を単体で確認
+```
+
+当たりの火花は `impacts/hit-spark`（素早く倒したときは `impacts/crit-hit`）をそのまま使っている。
+自前のパーティクルは書かず、既存の効果を座標に置くだけ。VFXの品質はライブラリ側に任せる。
+
+### QA（ブラウザなしで回す）
+
+```bash
+npm test                        # 15項目のロジックテスト
+node game/tools/dom-test.mjs    # main.js を DOM スタブで実行（描画まで通す）
+npm run qa:scene                # 情景だけPNGに
+npm run qa:slap                 # 着地→平手の連番PNG（game/records/slap/）
+npm run qa:hand                 # 手の全フェーズを拡大表示
+node game/tools/preview.mjs --scenario=play --crop=0,0,320,180,3   # 3倍で通し確認
+```
+
+`--crop=x,y,w,h,scale` を付けると拡大して細部を確認できる。出力は `game/records/`（git管理外）。
+
+---
+
+## 調整したいときの入口
+
+| 変えたいもの | 場所 |
+| --- | --- |
+| 夜の長さ・蚊の数・♥の数 | `game/src/palette.js` の `NIGHT`、`game/src/game.js` の `MAX_BUGS` / `HP_START` |
+| 難易度（着地頻度・速さ・肌を狙う率） | `game/src/game.js spawnBug()` の `speed` / `spotBias`、`mosquito.js` の `timer` |
+| 手応え（予備動作・ヒットストップの長さ） | `game/src/hand.js` の `ANTIC` / `STRIKE` / `HOLD`、`game.js killBug()` の `hitStop` |
+| 蚊の大きさ・見え方 | `game/src/mosquito.js drawMosquito()` の半径と `bugRim` の使い方 |
+| 明るさ・月明かり | `game/src/scene.js buildStatic()` の `beamTint` と `k` |

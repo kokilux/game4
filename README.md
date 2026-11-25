@@ -1,5 +1,25 @@
 # game4
 
+**KA — 夜の蚊取り**（ブラウザ / 45秒 / 320×180）と、その制作に使うエージェントスキル集。
+
+```bash
+npm run dev     # http://localhost:5173/game/
+npm test        # ゲームロジックの回帰テスト
+```
+
+- 遊び方・12アニメーション原則との対応 → [`game/README.md`](game/README.md)
+- テーマ検討の過程（日常体験の棚卸しと16の組み合わせ） → [`docs/theme-brainstorm.md`](docs/theme-brainstorm.md)
+
+## スキル
+
+| スキル | 役割 |
+| --- | --- |
+| `$pixelfx` | VFX・スプライトシート（当たりの火花、シミ、雨） |
+| `$imagegen` | キービジュアル・質感テクスチャ |
+| `$playwright-interactive` | ブラウザでのフレーム単位QA |
+| `$openai-docs` | OpenAI API を使う場合の最新仕様確認 |
+
+
 ブラウザゲーム用のリポジトリ。エージェント向けスキル（Agent Skills）を同梱しています。
 
 ## インストール済みスキル

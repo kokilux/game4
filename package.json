@@ -1,0 +1,15 @@
+{
+  "name": "game4",
+  "private": true,
+  "type": "module",
+  "description": "KA — 夜の蚊取り。日常の12アニメーション原則ゲーム。",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "serve": "node scripts/serve.mjs",
+    "qa:scene": "node game/tools/preview.mjs --scene",
+    "qa:hand": "node game/tools/preview.mjs --hand",
+    "qa:slap": "node game/tools/preview.mjs --scenario=slap",
+    "test": "node game/tools/sim-test.mjs",
+    "skills:check": "node scripts/sync-skills.mjs --check"
+  }
+}
