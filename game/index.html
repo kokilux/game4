@@ -73,6 +73,18 @@
         height: 14px;
       }
       #notes { font-size: 10px; color: #4f4a68; letter-spacing: 0.1em; }
+      #fatal {
+        position: fixed;
+        left: 12px; right: 12px; bottom: 12px;
+        padding: 10px 12px;
+        background: #2a0f18;
+        border: 1px solid #7d1a2b;
+        border-radius: 6px;
+        color: #ffc9d2;
+        font-size: 12px;
+        line-height: 1.6;
+        z-index: 9;
+      }
       @media (max-width: 520px) { #notes { display: none; } }
     </style>
   </head>
@@ -89,6 +101,28 @@
       <div id="info"></div>
       <div id="notes">羽音が近いほど高く大きい ・ 蚊は着地の直前に「止まる」 ・ その一瞬が狙い目</div>
     </div>
-    <script type="module" src="./src/main.js"></script>
+    <div id="fatal" hidden></div>
+    <script>
+      // 何か失敗したら黙って死なない：必ず画面に出す
+      window.__KA_ERRORS = [];
+      function kaFail(msg) {
+        window.__KA_ERRORS.push(msg);
+        var el = document.getElementById("fatal");
+        if (!el) return;
+        el.hidden = false;
+        el.textContent = "読み込みエラー: " + msg;
+      }
+      window.addEventListener("error", function (e) {
+        kaFail((e.message || "unknown error") + (e.filename ? " @ " + e.filename.split("/").pop() : ""));
+      });
+      window.addEventListener("unhandledrejection", function (e) {
+        kaFail(String((e.reason && e.reason.message) || e.reason));
+      });
+      // モジュールが動き出さなかった場合の番犬
+      setTimeout(function () {
+        if (!window.__KA_BOOTED) kaFail("main.js が起動しませんでした（サーバのパス設定か、ブラウザのキャッシュを確認）");
+      }, 2500);
+    </script>
+    <script type="module" src="/game/src/main.js"></script>
   </body>
 </html>

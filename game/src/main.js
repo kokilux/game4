@@ -3,7 +3,10 @@
 import { composite, createFrame } from "../../vendor/pixelfx/src/core/index.js";
 import { createGame } from "./game.js";
 import { createAudio } from "./audio.js";
-import { W, H } from "./palette.js";
+import { W, H, NIGHT } from "./palette.js";
+
+// 起動マーカー（index.html の番犬が見ている）
+window.__KA_BOOTED = true;
 
 const canvas = document.getElementById("screen");
 const ctx = canvas.getContext("2d");
@@ -39,15 +42,26 @@ function toGame(e) {
   return { x, y };
 }
 
-canvas.addEventListener("pointermove", (e) => {
+window.addEventListener("pointermove", (e) => {
+  const r = canvas.getBoundingClientRect();
+  const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+  if (!inside) return;
   const { x, y } = toGame(e);
   game.pointer(x, y);
 });
 
 function action(e) {
-  e.preventDefault();
+  if (e && e.cancelable) e.preventDefault();
   unlock();
   const g = game.state;
+  // キャンバス内なら狙いを更新（外なら今の狙いのまま）
+  if (e && typeof e.clientX === "number") {
+    const r = canvas.getBoundingClientRect();
+    if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+      const { x, y } = toGame(e);
+      game.pointer(x, y);
+    }
+  }
   if (g.phase === "ready") {
     game.start();
     audio.start();
@@ -64,7 +78,8 @@ function action(e) {
   game.slap();
 }
 
-canvas.addEventListener("pointerdown", action);
+// 画面のどこを叩いても反応する（キャンバスの外でも開始・平手できる）
+window.addEventListener("pointerdown", action);
 window.addEventListener("keydown", (e) => {
   if (e.code === "Space" || e.code === "KeyZ" || e.code === "Enter") {
     if (e.repeat) return;
@@ -137,7 +152,23 @@ function loop(now) {
   ctx.putImageData(img, 0, 0);
 
   syncOverlay();
+  updateStatus();
   requestAnimationFrame(loop);
+}
+
+let lastStatus = 0;
+function updateStatus() {
+  const g = game.state;
+  const t = Math.floor(g.t);
+  if (t === lastStatus) return;
+  lastStatus = t;
+  const bits = [];
+  if (g.phase === "ready") bits.push("TAP TO START");
+  else if (g.phase === "play") bits.push(`NIGHT ${Math.max(0, Math.ceil(NIGHT - g.night))}s`);
+  else bits.push(g.banner ?? "");
+  bits.push(`CATCH ${g.kills}/7`);
+  if (audio.muted) bits.push("SOUND OFF");
+  hudInfo.textContent = bits.join(" ・ ");
 }
 
 let lastPhase = "";

@@ -108,3 +108,22 @@ node game/tools/preview.mjs --scenario=play --crop=0,0,320,180,3   # 3倍で通�
 | 手応え（予備動作・ヒットストップの長さ） | `game/src/hand.js` の `ANTIC` / `STRIKE` / `HOLD`、`game.js killBug()` の `hitStop` |
 | 蚊の大きさ・見え方 | `game/src/mosquito.js drawMosquito()` の半径と `bugRim` の使い方 |
 | 明るさ・月明かり | `game/src/scene.js buildStatic()` の `beamTint` と `k` |
+
+## うまく遊べないとき
+
+- **画面に「KA」は出るのに、タップしても何も起きない**
+  以前はこれが起きました。サーバが `/` に `game/index.html` の中身をそのまま返していたため、
+  HTML 内の `./src/main.js` が `/src/main.js` に解決されて 404 になり、JavaScript が一切動いていませんでした。
+  いまは `/` → `/game/` に **302 リダイレクト**し、スクリプトは絶対パス（`/game/src/main.js`）で読み込みます。
+  同じ事故を防ぐために `npm run smoke` を追加しました（リダイレクト・HTML内の参照・import 先 28 本をHTTPで確認）。
+
+- **読み込みに失敗した**
+  画面下に赤い帯でエラー文が出ます（`index.html` の番犬が `main.js` の起動を確認している）。
+  キャッシュが疑わしいときはスーパーリロード。
+
+- **音が出ない**
+  最初のタップで AudioContext が有効になります。`M` で無音の切り替え。音がなくても遊べます。
+
+- **蚊が見つからない**
+  月明かりの帯（窓からの光）を通るとき、または着地したときに見えます。
+  羽音が近いほど高く大きくなり、空気の波紋でも位置がわかります。

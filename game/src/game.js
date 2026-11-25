@@ -46,6 +46,8 @@ export function createGame({ seed = 3 } = {}) {
     revealT: 0,
     showPrinciples: true, // P キーで切替（実装した12原則の表示）
     principle: { name: "", t: 0 },
+    hintT: 7, // 最初の数秒だけ操作説明を出す
+    hintDone: false,
   };
 
   /** いま効いているアニメーション原則を表示用に記録する。 */
@@ -115,6 +117,7 @@ export function createGame({ seed = 3 } = {}) {
 
   function killBug(bug, ip) {
     notePrinciple("SQUASH & STRETCH", 0.5);
+    g.hintDone = true;
     const landed = bug.state === "land";
     const grace = bug.spot?.kind === "skin" ? 1.2 : 2.0;
     const fast = landed && bug.landTimer > grace;
@@ -149,7 +152,8 @@ export function createGame({ seed = 3 } = {}) {
     g.events.push({ type: "whiff" });
     // 空振りの砂ぼこり
     for (let i = 0; i < 3; i++) g.fx.thud(ip.x + (g.r() - 0.5) * 10, ip.y + (g.r() - 0.5) * 6);
-    if (ip.y < 96) popup("MISS", ip.x, ip.y - 12, C.textDim);
+    popup("MISS", ip.x, ip.y - 12, C.textDim);
+    g.hintT = Math.max(g.hintT, 1.2);
   }
 
   function endGame(reason) {
@@ -191,6 +195,7 @@ export function createGame({ seed = 3 } = {}) {
     if (g.shake > 0) g.shake = Math.max(0, g.shake - dt * 2.2);
     if (g.revealT > 0) g.revealT -= dt;
     if (g.principle.t > 0) g.principle.t -= dt;
+    if (g.phase === "play" && g.hintT > 0 && !g.hintDone) g.hintT -= dt;
 
     for (const s of g.splats) s.t += dt;
     for (const m of g.marks) m.t += dt;
@@ -310,6 +315,14 @@ export function createGame({ seed = 3 } = {}) {
 
     drawHud(p, g);
     if (g.showPrinciples) drawPrinciple(p, g);
+
+    // 最初の一晩だけ：待つ→叩く、を言葉でも示す
+    if (g.phase === "play" && !g.hintDone && g.hintT > 0) {
+      const a = Math.min(1, g.hintT / 1.5);
+      const hovering = g.bugs.some((b) => b.state === "hover" || b.state === "land");
+      const msg = hovering ? "SLAP NOW!" : "WAIT... IT LANDS SOON";
+      text(p, msg, W / 2, H - 26, hovering ? C.warm : C.textDim, { align: "center", alpha: a });
+    }
 
     // 明け方：画面全体をゆっくり暖色へ（ディザではなく色そのものを寄せる）
     if (g.phase === "dawn" || g.phase === "over") {

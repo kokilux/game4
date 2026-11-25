@@ -63,7 +63,7 @@ function tick(ms) {
 }
 
 // タイトル → タップで開始
-const pointerdown = canvasListeners.get("pointerdown");
+const pointerdown = listeners.get("pointerdown") ?? canvasListeners.get("pointerdown");
 if (!pointerdown) throw new Error("pointerdown が登録されていない");
 pointerdown({ preventDefault() {}, clientX: 640, clientY: 360 });
 

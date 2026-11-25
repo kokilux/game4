@@ -25,7 +25,14 @@ const TYPES = {
 
 createServer((req, res) => {
   let path = decodeURIComponent((req.url || "/").split("?")[0]);
-  if (path === "/") path = "/game/";
+
+  // ルートは必ず /game/ へ「リダイレクト」する。
+  // 中身をそのまま返すと、HTML内の ./src/main.js が /src/main.js に解決されて 404 になる。
+  if (path === "/" || path === "/index.html") {
+    res.writeHead(302, { location: "/game/" });
+    res.end();
+    return;
+  }
   if (path.endsWith("/")) path += "index.html";
   const rel = normalize(path).replace(/^([/\\]|\.\.([/\\]|$))+/, "");
   const file = join(ROOT, rel);

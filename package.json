@@ -10,6 +10,7 @@
     "qa:hand": "node game/tools/preview.mjs --hand",
     "qa:slap": "node game/tools/preview.mjs --scenario=slap",
     "test": "node game/tools/sim-test.mjs",
-    "skills:check": "node scripts/sync-skills.mjs --check"
+    "skills:check": "node scripts/sync-skills.mjs --check",
+    "smoke": "node scripts/smoke.mjs"
   }
 }
