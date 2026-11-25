@@ -1,6 +1,7 @@
 // 蚊。飛ぶ → 迷う → 着地寸前で「止まる」（＝予備動作）→ 着地 → 刺す、の繰り返し。
 // 叩けるのは hover と land の間だけ。飛んでいる最中に叩くと空振りになる。
 
+import { mix } from "../../vendor/pixelfx/src/core/index.js";
 import { C } from "./palette.js";
 import { lerp, clamp01, easeOutCubic, rng } from "./draw.js";
 
@@ -196,9 +197,14 @@ export function drawMosquito(p, m, t, world) {
   }
 
   // 羽音の波紋（暗闇で位置を探す手がかり）
+  // 半透明のリングはディザで「点々」になり、埃に見える。四方向の短い線で描く。
   if (!landed) {
     const pulse = (t * 1.15) % 1;
-    if (!visible) p.ring(x, y, 6 + pulse * 12, 1, C.wing, 0.14 * (1 - pulse));
+    const r = 6 + pulse * 9;
+    const col = visible ? mix(C.void, C.wing, 0.5) : mix(C.void, C.wing, 0.3);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      p.line(x + dx * r * 0.62, y + dy * r * 0.5, x + dx * r, y + dy * r * 0.8, col);
+    }
   }
 
   // 本体の明度：月明かりの中では明るく、暗がりではシルエット
@@ -269,10 +275,13 @@ export function drawMosquito(p, m, t, world) {
     p.place(0, 0);
   }
 
-  // ネラえる合図：体のまわりが少しだけ脈打つ（点は打たない）
+  // 狙える合図：体の四方向に短い目盛り（リングの点々は埃に見えた）
   if (hittableNow && (hover || landed)) {
-    const a = 0.25 + Math.sin(t * 16) * 0.2;
-    p.ring(x + 1, y + 0.4, 7.5, 1, C.wingHi, a * 0.5);
+    const a = 0.45 + Math.sin(t * 16) * 0.25;
+    const col = a > 0.5 ? C.wingHi : C.wing;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      p.line(x + 1 + dx * 6, y + 0.4 + dy * 5, x + 1 + dx * 8.5, y + 0.4 + dy * 7, col);
+    }
   }
   // 光の帯の中ではリムライト
   if (visible) {
