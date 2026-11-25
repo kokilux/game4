@@ -2,21 +2,9 @@
 // 叩けるのは hover と land の間だけ。飛んでいる最中に叩くと空振りになる。
 
 import { C } from "./palette.js";
-import { inBeam, surfaceY } from "./scene.js";
-import { lerp, clamp01, easeOutCubic, easeInQuad, rng } from "./draw.js";
+import { lerp, clamp01, easeOutCubic, rng } from "./draw.js";
 
-// 着地候補。skin は刺される＝危険、wall/blanket は時間切れで飛び立つ。
-export const SPOTS = [
-  { x: 148, y: 38, kind: "wall" },
-  { x: 222, y: 30, kind: "wall" },
-  { x: 118, y: 58, kind: "wall" },
-  { x: 276, y: 52, kind: "wall" },
-  { x: 52, y: 104, kind: "skin" }, // 顔
-  { x: 108, y: 104, kind: "skin" }, // 肩
-  { x: 160, y: 116, kind: "blanket" },
-  { x: 232, y: 122, kind: "blanket" },
-  { x: 96, y: 128, kind: "blanket" },
-];
+// 着地候補はステージ側（world.spots）が持つ。kind:"skin" は刺される＝危険。
 
 const AIR = { x0: 16, x1: 304, y0: 22, y1: 92 };
 
@@ -44,7 +32,16 @@ export function createMosquito({ seed = 1, speed = 1, spotBias = 0.35 } = {}) {
   return m;
 }
 
-export const hittable = (m) => m.state === "hover" || m.state === "land";
+/** どの状態でも叩ける。ただし当たり半径は空中で小さい（=当てにくい）。 */
+export const hittable = (m) => m.state !== "escape";
+export const hitRadius = (m) => (m.state === "land" ? 18 : m.state === "hover" ? 15 : 10);
+export const airborne = (m) => m.state === "fly" || m.state === "approach";
+
+/** 空中で手が近づくと身をかわす：当てるには先読みが要る。 */
+export const inDanger = (m, px, py) => {
+  const dx = m.x - px, dy = m.y - py;
+  return dx * dx + dy * dy < 30 * 30;
+};
 
 export function isLanded(m) {
   return m.state === "land";
@@ -52,14 +49,14 @@ export function isLanded(m) {
 
 /** 更新。戻り値はイベント（"bite" | "takeoff" | null）。 */
 export function updateMosquito(m, dt, ctx) {
-  const { player, t } = ctx;
+  const { player, t, world } = ctx;
   let event = null;
   m.t += dt;
   m.wing += dt * (m.state === "land" ? 6 : 46);
 
   // プレイヤーの手が近いと怯えて逃げる（飛んでいるときだけ）
   const dpx = m.x - player.x, dpy = m.y - player.y;
-  const near = dpx * dpx + dpy * dpy < 22 * 22;
+  const near = dpx * dpx + dpy * dpy < 30 * 30;
 
   if (m.state === "fly") {
     // ゆらゆら飛ぶ：目標点へ向かう舵 + 上下の揺れ
@@ -74,12 +71,13 @@ export function updateMosquito(m, dt, ctx) {
     m.vx += Math.cos(ang) * steer * dt;
     m.vy += Math.sin(ang) * steer * dt + Math.sin(m.t * 3.1 + m.jitter) * 30 * dt;
     if (near) {
-      // 手から逃げる
-      m.vx -= (dpx / 22) * 320 * dt;
-      m.vy -= (dpy / 22) * 320 * dt;
+      // 手から逃げる（空中で叩くのを難しくする）
+      const d = Math.max(6, Math.hypot(dpx, dpy));
+      m.vx += (dpx / d) * 420 * dt;
+      m.vy += (dpy / d) * 420 * dt;
     }
     const sp = Math.hypot(m.vx, m.vy) || 1;
-    const maxSp = want * (near ? 2.1 : 1);
+    const maxSp = want * (near ? 2.3 : 1);
     if (sp > maxSp) { m.vx = (m.vx / sp) * maxSp; m.vy = (m.vy / sp) * maxSp; }
     m.x += m.vx * dt; m.y += m.vy * dt;
     // 画面内に押し戻す
@@ -91,10 +89,10 @@ export function updateMosquito(m, dt, ctx) {
     if (m.timer - m.t < 0.45 && !m.picked) {
       // 着地の予告：狙いを決めて、羽音が高くなる
       m.picked = true;
-      m.nextIntent = pickSpot(m);
+      m.nextIntent = pickSpot(m, world);
     }
     if (m.t > m.timer) {
-      m.spot = m.nextIntent ?? pickSpot(m);
+      m.spot = m.nextIntent ?? pickSpot(m, world);
       m.state = "approach";
       m.t = 0;
       m.picked = false;
@@ -161,12 +159,13 @@ function startEscape(m) {
   m.vy = ((ay - m.y) / d) * 150 * m.speed;
 }
 
-function pickSpot(m) {
+function pickSpot(m, world) {
   // 顔など肌を狙う確率は難易度（spotBias）で上がる
-  const skin = SPOTS.filter((s) => s.kind === "skin");
-  const rest = SPOTS.filter((s) => s.kind !== "skin");
+  const spots = world.spots;
+  const skin = spots.filter((s) => s.kind === "skin");
+  const rest = spots.filter((s) => s.kind !== "skin");
   const wantSkin = m.r() < m.spotBias;
-  const pool = wantSkin ? skin : rest;
+  const pool = wantSkin && skin.length ? skin : rest;
   return pool[Math.floor(m.r() * pool.length)];
 }
 
@@ -175,10 +174,10 @@ export function biteEta(m) {
   return m.state === "land" && m.spot?.kind === "skin" ? Math.max(0, m.landTimer) : Infinity;
 }
 
-export function drawMosquito(p, m, t) {
+export function drawMosquito(p, m, t, world) {
   const { x, y } = m;
   const landed = m.state === "land";
-  const visible = inBeam(x, y) || landed;
+  const visible = world.inBeam(x, y) || landed || m.state === "hover";
   const hittableNow = hittable(m);
 
   // 着地しているときだけ、足元に小さな影

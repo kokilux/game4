@@ -12,7 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { composite, createFrame, painterFor } from "../../vendor/pixelfx/src/core/index.js";
 import { encodePNG } from "../../vendor/pixelfx/tools/lib/png.mjs";
-import { buildStatic, drawSleeper, drawAmbient } from "../src/scene.js";
+import { stageWorld, drawSleeper } from "../src/scene.js";
 import { createGame } from "../src/game.js";
 import { createHand, drawHand } from "../src/hand.js";
 
@@ -50,13 +50,16 @@ const t2 = (v) => v.toFixed(2).replace(".", "_");
 
 // --- 静的画面 ---
 if (args.scene) {
+  const idx = Number(args.stage ?? 0);
+  const w = stageWorld(idx);
+  const tt = Number(args.t ?? 0.7);
   const frame = createFrame(320, 180);
-  const bg = buildStatic();
-  frame.color.set(bg.color);
+  frame.color.set(w.frame.color);
   const p = painterFor(frame);
-  drawSleeper(p, Number(args.t ?? 0.7));
-  drawAmbient(p, Number(args.t ?? 0.7));
-  console.log(save("scene", frame, "static"));
+  w.drawAmbient(p, tt);
+  drawSleeper(p, tt, Number(args.mood ?? 0), w.pal);
+  w.drawOver(p, tt);
+  console.log(save("scene", frame, `s${idx}`));
   process.exit(0);
 }
 
@@ -83,6 +86,20 @@ if (args.hand) {
 
 const STEP = 1 / 60;
 const scenario = args.scenario ?? "slap";
+
+// ステージクリアのバナー（NIGHT CLEAR → 次の部屋）
+if (scenario === "banner") {
+  const g = createGame({ seed: 5 });
+  g.start();
+  for (let i = 0; i < 120; i++) g.update(1 / 60);
+  g.state.kills = g.state.world.bugs; // 全部捕まえたことにする
+  for (let i = 0; i < 30; i++) g.update(1 / 60); // インターリュードへ
+  for (let i = 0; i < 18; i++) g.update(1 / 60);
+  const f = g.snapshot();
+  console.log(save("banner", f, `stage${g.state.stageIndex}`));
+  console.log("phase=" + g.state.phase, "banner=" + g.state.banner);
+  process.exit(0);
+}
 const game = createGame({ seed: Number(args.seed ?? 5) });
 game.draw(createFrame(320, 180));
 game.start();

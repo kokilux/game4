@@ -41,15 +41,29 @@ console.log("KA ロジック");
 }
 
 {
+  // 空中の蚊：真上を狙えば当たる（判定は小さい）
   const g = createGame({ seed: 9 });
   g.start();
   run(g, 1.0); // まだ飛んでいる
   const d = g.debug();
-  check("飛んでいる蚊は叩けない", d.state === "fly", d.state);
+  check("飛んでいる蚊は空中にいる", d.air === true, String(d.air));
   g.pointer(d.mosquito.x, d.mosquito.y);
+  run(g, 0.1);
   g.slap();
-  run(g, 0.4);
-  check("空振りはキルにならない", g.debug().kills === 0, String(g.debug().kills));
+  run(g, 0.5);
+  check("空中の蚊も叩ける", g.debug().kills === 1, String(g.debug().kills));
+}
+{
+  // 空中の蚊：狙いが外れれば空振り
+  const g = createGame({ seed: 9 });
+  g.start();
+  run(g, 1.0);
+  const d = g.debug();
+  g.pointer(d.mosquito.x + 26, d.mosquito.y + 18);
+  run(g, 0.1);
+  g.slap();
+  run(g, 0.5);
+  check("外れたら空振り", g.debug().kills === 0, String(g.debug().kills));
   check("空振りはカウントされる", g.state.misses >= 1, String(g.state.misses));
 }
 
@@ -95,10 +109,16 @@ console.log("KA ロジック");
 {
   const g = createGame({ seed: 2 });
   g.start();
-  run(g, 46);
-  check("45秒で夜が明ける", g.state.phase === "dawn" || g.state.phase === "over", g.state.phase);
+  const night = g.state.world.night;
+  check("夜の長さはステージで決まる", night >= 40, String(night));
+  let left = false;
+  for (let i = 0; i < (night + 8) / STEP && !left; i++) {
+    g.update(STEP);
+    if (g.state.phase !== "play") left = true;
+  }
+  check("夜が明けると play を抜ける", left, g.state.phase);
   run(g, 3);
-  check("リザルトに移る", g.state.phase === "over", g.state.phase);
+  check("夜明け後は次のステージへ進む", g.state.stageIndex === 1 && g.state.phase === "play", `stage=${g.state.stageIndex} ${g.state.phase}`);
   g.restart();
   g.start();
   check("再挑戦でリセットされる", g.state.hp === 3 && g.state.kills === 0 && g.state.score === 0, JSON.stringify(g.debug()));
