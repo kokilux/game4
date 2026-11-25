@@ -47,6 +47,7 @@ const RAW = {
   skinDeep: "#7a5344",
   hair: "#1e1826",
   hairHi: "#2e2638",
+  hairLo: "#141020",
   mouth: "#6d4147",
   eye: "#3a2a33",
   zit: "#c2505c",
@@ -63,6 +64,8 @@ const RAW = {
   hand: "#a87f68",
   handHi: "#d8b096",
   handLo: "#7a5847",
+  handLine: "#2a1b16",
+  handWrist: "#5e4234",
   handShadow: "#0a0810",
 
   // 効果

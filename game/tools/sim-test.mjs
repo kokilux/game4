@@ -111,8 +111,14 @@ console.log("KA ロジック");
   g.start();
   const night = g.state.world.night;
   check("夜の長さはステージで決まる", night >= 40, String(night));
+  // 何もしないと刺されて夜が終わるので、着地した蚊を叩きながら夜を進める
   let left = false;
   for (let i = 0; i < (night + 8) / STEP && !left; i++) {
+    const b = g.state.bugs[0];
+    if (b && (b.state === "land" || b.state === "hover")) {
+      g.pointer(b.x, b.y);
+      g.slap();
+    }
     g.update(STEP);
     if (g.state.phase !== "play") left = true;
   }
@@ -138,6 +144,18 @@ console.log("KA ロジック");
   };
   check("決定的（同じ種で同じ動き）", trace(4) === trace(4));
   check("種が違えば動きも違う", trace(4) !== trace(5));
+}
+
+{
+  // 無視すると刺される（＝放置が許されない）。布団に降りた蚊は逃げたあと顔を狙い直す
+  const g = createGame({ seed: 1 });
+  g.start();
+  let t = 0, bitten = false;
+  for (; t < 60 * 60 && !bitten; t++) {
+    g.update(STEP);
+    if (g.state.bites > 0) bitten = true;
+  }
+  check("放置すると刺される", bitten && t / 60 < 40, `${(t / 60).toFixed(1)}s で ${g.state.bites} 回`);
 }
 
 console.log(`\n${pass} pass, ${fail} fail`);

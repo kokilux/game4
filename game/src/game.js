@@ -33,9 +33,11 @@ export function createGame({ seed = 3 } = {}) {
     bugs: [],
     bugId: 0,
     splats: [],
+    sparks: [],
     marks: [],
     hitStop: 0,
     flash: 0,
+    hitAt: null,
     shake: 0,
     popups: [],
     events: [],
@@ -172,8 +174,7 @@ export function createGame({ seed = 3 } = {}) {
   function killBug(bug, ip) {
     const air = airborne(bug);
     const landed = bug.state === "land";
-    const grace = bug.spot?.kind === "skin" ? 1.2 : 2.0;
-    const fast = landed && bug.landTimer > grace;
+    const fast = bug.state === "hover"; // 予備動作を読んで叩けた
     const onSkin = bug.spot?.kind === "skin";
 
     g.kills++;
@@ -187,8 +188,9 @@ export function createGame({ seed = 3 } = {}) {
 
     g.hitStop = air ? 0.075 : 0.09;
     g.flash = FLASH;
+    g.hitAt = { x: bug.x, y: bug.y };
     g.shake = air ? 0.26 : 0.22;
-    g.fx.slap(bug.x, bug.y, fast || air);
+    addSpark(bug.x, bug.y, air ? 1.25 : fast ? 1.1 : 1);
     addSplat(bug.x, bug.y, air ? "air" : onSkin ? "skin" : "wall");
     popup(air ? "SWAT!" : fast ? "PACHI!!" : "PACHI!", bug.x, bug.y - 14, air ? C.wingHi : C.warm, true);
     popup("+" + gain, bug.x, bug.y - 24, C.textDim);
@@ -204,12 +206,50 @@ export function createGame({ seed = 3 } = {}) {
   function missSlap(ip) {
     g.misses++;
     g.combo = 0;
+    // 空振りすると、近くにいる蚊は驚いて飛び立つ（連打が効かない理由）
+    for (const b of g.bugs) {
+      if (b.state === "land" || b.state === "hover") {
+        if (Math.hypot(b.x - ip.x, b.y - ip.y) < 26) {
+          flee(b);
+          popup("ESCAPE", b.x, b.y - 10, C.textDim);
+        }
+      }
+    }
     g.shake = 0.08;
     g.events.push({ type: "whiff" });
     g.fx.thud(ip.x, ip.y);
     popup("MISS", ip.x, ip.y - 12, C.textDim);
     g.hintT = Math.max(g.hintT, 1.2);
     notePrinciple("ARCS / FOLLOW THROUGH", 0.45);
+  }
+
+  /** 当たった瞬間の飛沫（白と生成りだけ。原色の星は使わない）。 */
+  function addSpark(x, y, scale = 1) {
+    g.sparks.push({ x, y, t: 0, life: 0.24, scale });
+  }
+
+  function drawSparks(p, dt) {
+    for (let i = g.sparks.length - 1; i >= 0; i--) {
+      const s = g.sparks[i];
+      s.t += dt;
+      const k = clamp01(s.t / s.life);
+      if (k >= 1) { g.sparks.splice(i, 1); continue; }
+      const r = (2 + k * 9) * s.scale;
+      const a = 1 - k;
+      // 中心の白
+      p.disc(s.x, s.y, Math.max(0.6, 2.6 * s.scale * (1 - k * 0.7)), C.white, a);
+      // 8方向の飛沫
+      for (let j = 0; j < 8; j++) {
+        const ang = (j / 8) * Math.PI * 2 + 0.4;
+        const d = r * (j % 2 ? 1 : 0.72);
+        const px = Math.round(s.x + Math.cos(ang) * d);
+        const py = Math.round(s.y + Math.sin(ang) * d * 0.8);
+        p.dot(px, py, j % 3 === 0 ? C.warm : C.white, a);
+        if (k < 0.5) p.dot(Math.round(s.x + Math.cos(ang) * d * 0.6), Math.round(s.y + Math.sin(ang) * d * 0.48), C.pillowHi, a * 0.9);
+      }
+      // 外へ広がる輪
+      p.ring(s.x, s.y, r * 1.15, 1, C.wingHi, a * 0.5);
+    }
   }
 
   function popup(str, x, y, color = C.text, big = false) {
@@ -285,7 +325,9 @@ export function createGame({ seed = 3 } = {}) {
     if (g.hand.slapT >= 0 && !g.hand.impactDone && g.hand.slapT >= IMPACT_AT) resolveImpact();
 
     g.spawnIn -= dt;
-    if (g.spawnIn <= 0 && g.bugs.length === 0 && g.kills < g.world.bugs) spawnBug();
+    // 2晩目からは2匹同時。数で押してくる。
+    const maxLive = g.stageIndex >= 1 ? 2 : 1;
+    if (g.spawnIn <= 0 && g.bugs.length < maxLive && g.kills + g.bugs.length < g.world.bugs) spawnBug();
 
     for (const bug of [...g.bugs]) {
       const before = bug.state;
@@ -296,6 +338,7 @@ export function createGame({ seed = 3 } = {}) {
         g.combo = 0;
         g.shake = 0.4;
         g.flash = FLASH * 0.6;
+        g.hitAt = { x: bug.spot.x, y: bug.spot.y };
         addMark(bug.spot);
         addSplat(bug.spot.x, bug.spot.y, "skin");
         popup("BITE!", bug.spot.x, bug.spot.y - 12, C.zit, true);
@@ -342,15 +385,23 @@ export function createGame({ seed = 3 } = {}) {
     for (const b of g.bugs) drawMosquito(p, b, g.t, w);
     g.fx.draw(frame, "back");
     g.fx.draw(frame, "front");
+    // pixelfx のエフェクトは描画原点を place() したまま返すことがある。
+    // ここで戻さないと、続く布団や手が画面外に描かれて「布団が消える」。
+    p.reset();
     w.drawOver(p, g.t);
     drawHand(p, g.hand, g.t);
     p.place(0, 0);
 
+    // 画面全体を白く飛ばさない。当たった「その一点」だけが光る。
     if (g.flash > 0 && g.phase !== "over") {
-      // 白は「ディザ」ではなく、バッファを混ぜて一様にかぶせる
-      blendRect(frame, 0, 0, W, H, C.white, clamp01(g.flash / FLASH) * 0.8);
+      const k = clamp01(g.flash / FLASH);
+      const hx = g.hitAt?.x ?? g.hand.x;
+      const hy = g.hitAt?.y ?? g.hand.y;
+      for (let i = 1; i <= 3; i++) p.ring(hx, hy, 3 + i * 2 + (1 - k) * 7, 1, C.white, k * (0.9 - i * 0.22));
+      p.disc(hx, hy, 2.2, C.white, k * 0.5);
     }
 
+    drawSparks(p, g.hitStop > 0 ? 0 : 1 / 60); // ヒットストップ中も飛沫は進める
     for (const pop of g.popups) {
       const k = pop.t / pop.life;
       text(p, pop.str, pop.x, pop.y - k * 8, pop.color, {

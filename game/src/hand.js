@@ -99,79 +99,111 @@ export function slapPose(h) {
   return { sx: lerp(1.36, 1, p) + wobble, sy: lerp(0.62, 1, p) - wobble, glow: Math.max(0, 0.6 - p) };
 }
 
-const TILT = -0.14; // 手首が右下から来るぶんの傾き
+// 手首が右下から来るぶんの傾き
+const TILT = -0.12;
 
+// 上から見た平手。指を広げた形と、叩きつけて潰れた形の2枚で「つぶれ・伸び」を作る。
+// 文字は #=輪郭 / S=肌 / H=明るみ / L=陰 / W=手首
+const HAND_OPEN = [
+  "........................",
+  "...........##...........",
+  "..........#SS#..##......",
+  "......##.#HHHH##SS#.....",
+  ".....#SS##HHHH#HHHH#....",
+  "....#HHHH#SSSS#HHHH#....",
+  "....#HHHH#SSSS#SSSS#.#..",
+  "....#SSSS#SSSS#SSSS##S#.",
+  "....#SSSS#SSSS#SSSS#HHH#",
+  "....#SSSS#SSSS#SSSS#HHH#",
+  "....#SSSS#SSSS#SSSS#SSS#",
+  "....#SSSSSSSSSSSSSS#SSS#",
+  "...##HHHHHHHHHHHHHHHHHL#",
+  ".##LLLLLLLLLLLLLLLLLL##.",
+  "#SSSSSSLSSSSSSSSSSSSL#..",
+  "SSSSSSSLSSSSSSSSSSSSSL#.",
+  "SSSSSSSLSSSSSSSSSSSSSL#.",
+  "SSSSSSSLSSSSSSSSSSSSSL#.",
+  "#SSSSSSLSSSSSSSSSSSSSL#.",
+  ".#SSSSSSSSSSSSSSSSSSSL#.",
+  "..#SSSSSSSSSSSSSSSSSL#..",
+  "...##SSSSSSSSSSSSSSSL#..",
+  ".....#LLLLLLLLLLLLLL#...",
+  "......##LLLLLLLLLL##....",
+  "........#WWWWWWWW#......",
+  ".......#LLLLLLLLLL#.....",
+  ".......#WWWWWWWWWW#.....",
+  ".......#WWWWWWWWWW#.....",
+  "........#WWWWWWWW#......",
+  ".........#WWWWWW#.......",
+];
+
+const HAND_FLAT = [
+  ".....#SS##HHHH#HHHH#....",
+  "....#HHHH#SSSS#HHHH#....",
+  "....#HHHH#SSSS#SSSS#.#..",
+  "....#SSSS#SSSS#SSSS##S#.",
+  "....#SSSS#SSSS#SSSS#HHH#",
+  "....#SSSS#SSSS#SSSS#HHH#",
+  "....#SSSS#SSSS#SSSS#SSS#",
+  "....#SSSSSSSSSSSSSS#SSS#",
+  "...##HHHHHHHHHHHHHHHHHL#",
+  ".##LLLLLLLLLLLLLLLLLL##.",
+  "#SSSSSSLSSSSSSSSSSSSL#..",
+  "SSSSSSSLSSSSSSSSSSSSSL#.",
+  "SSSSSSSLSSSSSSSSSSSSSL#.",
+  "SSSSSSSLSSSSSSSSSSSSSL#.",
+  "#SSSSSSLSSSSSSSSSSSSSL#.",
+  ".#SSSSSSSSSSSSSSSSSSSL#.",
+  "..#SSSSSSSSSSSSSSSSSL#..",
+  "...##SSSSSSSSSSSSSSSL#..",
+  ".....#LLLLLLLLLLLLLL#...",
+  "......##LLLLLLLLLL##....",
+  "........#WWWWWWWW#......",
+  ".......#LLLLLLLLLL#.....",
+  ".......#WWWWWWWWWW#.....",
+  ".......#WWWWWWWWWW#.....",
+  "........#WWWWWWWW#......",
+  ".........#WWWWWW#.......",
+];
+
+const HAND_PALM = { x: 12, y: 17 }; // 手のひらの中心（スプライト内）
+const FLAT_PALM = { x: 12, y: 13 }; // 叩いた形は指4pxぶん縮む
+
+/**
+ * 上から見た平手。叩くと「潰れた手」に差し替わる（＝スカッシュ）。
+ */
 export function drawHand(p, h, t) {
   const { sx, sy, glow } = slapPose(h);
   const cx = h.x, cy = h.y;
   const slapping = h.slapT >= 0;
+  const flat =
+    slapping && h.slapT > ANTIC + STRIKE * 0.82 && h.slapT < ANTIC + STRIKE + HOLD * 1.05;
 
   // 布団の上にいるときだけ、手のすぐ下に影を落とす
-  if (cy > 100) {
-    p.ellipse(cx + 7, cy + 15, 9 * sx, 2.6, C.void, 0.55);
-    p.ellipse(cx + 7, cy + 15, 7 * sx, 1.8, C.blanketLo);
+  if (cy > 96) {
+    p.ellipse(cx + 8, cy + 17, 10 * sx, 2.4, C.void, 0.5);
+    p.ellipse(cx + 8, cy + 17, 7.5 * sx, 1.6, C.blanketLo);
   }
 
-  const cs = Math.cos(TILT), sn = Math.sin(TILT);
-  const at = (dx, dy) => [cx + dx * sx * cs - dy * sy * sn, cy + dx * sx * sn + dy * sy * cs];
-  const ell = (dx, dy, rx, ry, c) => {
-    const [X, Y] = at(dx, dy);
-    p.ellipse(X, Y, rx * sx, ry * sy, c);
-  };
+  const pal = { "#": C.handLine, S: C.hand, H: C.handHi, L: C.handLo, W: C.handWrist };
+  const rows = flat ? HAND_FLAT : HAND_OPEN;
+  const c0 = flat ? FLAT_PALM : HAND_PALM;
+  p.place(cx, cy, false, TILT);
+  p.sprite(rows, pal, -c0.x, -c0.y);
+  if (glow > 0.9) p.disc(0, -2, 4.5, C.white, 0.7);
+  p.place(0, 0);
 
-  // 手首（腕）
-  ell(2, 12, 6, 7, C.void);
-  ell(2, 12, 5, 6, C.handLo);
-
-  // [x, 指先のy, 長さ]
-  const F = [
-    [-8.6, -8.5, 8.5], // 小指
-    [-2.9, -13.5, 13.5], // 薬指
-    [2.9, -15.0, 15.0], // 中指
-    [8.6, -11.5, 11.5], // 人差し指
-  ];
-  const THUMB = [-10.4, 2.2, 3.4, 5.4];
-
-  // 1. 輪郭（指ごとに黒で囲む＝指の隙間が抜ける）
-  for (const f of F) ell(f[0], f[1] + f[2] / 2, 2.9, f[2] / 2 + 1.2, C.void);
-  ell(THUMB[0] - 0.6, THUMB[1], THUMB[2] + 1.1, THUMB[3] + 1.1, C.void);
-  ell(0, 2.5, 12.5, 9.4, C.void);
-
-  // 2. 塗り
-  for (const f of F) ell(f[0], f[1] + f[2] / 2, 1.95, f[2] / 2, C.hand);
-  ell(THUMB[0], THUMB[1], THUMB[2], THUMB[3], C.hand);
-  ell(0, 2.5, 11.4, 8.4, C.hand);
-
-  // 3. 光（右上）と影（下）
-  for (const f of F) ell(f[0] - 0.3, f[1] + f[2] / 2 - 0.8, 1.2, f[2] / 2 - 1.2, C.handHi);
-  ell(THUMB[0] - 0.4, THUMB[1] - 1.2, 2.0, 3.0, C.handHi);
-  ell(1.0, -0.4, 8.4, 5.6, C.handHi);
-  ell(-1.4, 6.4, 9.6, 2.8, C.handLo);
-  ell(-10.6, 4.6, 2.2, 3.0, C.handLo);
-  for (const f of F) ell(f[0], -3.8, 1.9, 1.1, C.handLo);
-  const [wx1, wy1] = at(-5.5, 2.2), [wx2, wy2] = at(-1, 3.4);
-  p.line(wx1, wy1, wx2, wy2, C.handLo);
-  const [nx1, ny1] = at(1.5, 4.6), [nx2, ny2] = at(6, 3.2);
-  p.line(nx1, ny1, nx2, ny2, C.handLo);
-
-  // 打撃の芯が白く飛ぶ
-  if (glow > 0.9) p.ellipse(cx, cy + 1, 5.5 * sx, 3.4 * sy, C.white);
-
-  // 風切り（弧）
-  if (slapping && h.slapT < ANTIC + STRIKE + 0.05) {
-    const a = 0.9 - h.slapT * 8;
-    if (a > 0) {
-      p.arc(cx, cy - 14, 22, 2, Math.PI * 0.12, Math.PI * 0.88, C.pillowHi, a);
-      p.arc(cx, cy - 20, 28, 1, Math.PI * 0.18, Math.PI * 0.82, C.textDim, a * 0.7);
+  // 風切り（弧）— 画面座標
+  if (slapping && h.slapT < ANTIC + STRIKE + 0.06) {
+    const a = Math.max(0, 0.85 - h.slapT * 7);
+    if (a > 0.02) {
+      p.arc(cx, cy - 12, 23, 2, Math.PI * 0.15, Math.PI * 0.85, C.pillowHi, a);
+      p.arc(cx, cy - 18, 29, 1, Math.PI * 0.2, Math.PI * 0.8, C.textDim, a * 0.6);
     }
   }
 
-  // 狙いの十字（ポインタの位置）
+  // 狙いの点。手のひらの中心に1pxだけ点く（青い十字は指の上で汚れて見えたので廃止）
   if (!slapping) {
-    const ax = Math.round(h.tx), ay = Math.round(h.ty);
-    const a = 0.55 + Math.sin(t * 4) * 0.15;
-    p.px(ax, ay - 4, C.textDim); p.px(ax, ay + 4, C.textDim);
-    p.px(ax - 4, ay, C.textDim); p.px(ax + 4, ay, C.textDim);
-    p.dot(ax, ay, C.text, a);
+    p.px(Math.round(h.tx), Math.round(h.ty), C.handHi);
   }
 }

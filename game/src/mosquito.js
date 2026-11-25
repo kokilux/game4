@@ -27,6 +27,7 @@ export function createMosquito({ seed = 1, speed = 1, spotBias = 0.35 } = {}) {
     jitter: r() * 6.28,
     bites: 0,
     spotBias,
+    annoyed: false,
   };
   m.homeX = m.x; m.homeY = m.y;
   return m;
@@ -116,7 +117,7 @@ export function updateMosquito(m, dt, ctx) {
       m.t = 0;
       m.x = m.spot.x;
       m.y = m.spot.y;
-      m.landTimer = m.spot.kind === "skin" ? 1.45 : 2.6;
+      m.landTimer = (m.spot.kind === "skin" ? 1.0 : 1.5) / m.speed; // 奥の夜ほど短い
       m.vx = 0; m.vy = 0;
     }
   } else if (m.state === "land") {
@@ -129,6 +130,7 @@ export function updateMosquito(m, dt, ctx) {
         startEscape(m);
       } else {
         event = "takeoff";
+        m.annoyed = true; // 無視された蚊は、次は肌（顔・耳）を狙う
         startEscape(m);
       }
     }
@@ -149,6 +151,10 @@ export function updateMosquito(m, dt, ctx) {
   return event;
 }
 
+export function flee(m) {
+  startEscape(m);
+}
+
 function startEscape(m) {
   m.state = "escape";
   m.t = 0;
@@ -164,9 +170,11 @@ function pickSpot(m, world) {
   const spots = world.spots;
   const skin = spots.filter((s) => s.kind === "skin");
   const rest = spots.filter((s) => s.kind !== "skin");
-  const wantSkin = m.r() < m.spotBias;
+  const wantSkin = m.annoyed || m.r() < m.spotBias;
   const pool = wantSkin && skin.length ? skin : rest;
-  return pool[Math.floor(m.r() * pool.length)];
+  const spot = pool[Math.floor(m.r() * pool.length)];
+  if (spot.kind === "skin") m.annoyed = false;
+  return spot;
 }
 
 /** 着地中に刺すまでの残り時間（HUD の警告に使う）。 */
@@ -177,71 +185,98 @@ export function biteEta(m) {
 export function drawMosquito(p, m, t, world) {
   const { x, y } = m;
   const landed = m.state === "land";
-  const visible = world.inBeam(x, y) || landed || m.state === "hover";
+  const hover = m.state === "hover";
+  const visible = world.inBeam(x, y) || landed || hover;
   const hittableNow = hittable(m);
 
-  // 着地しているときだけ、足元に小さな影
-  if (landed && y > 96) {
-    p.ellipse(x + 1.5, y + 2.2, 4, 1.3, C.void);
-    p.ellipse(x + 1.5, y + 2.0, 3, 0.8, C.blanketLo);
+  // 着地しているときは、必ず足元に影
+  if (landed || hover) {
+    p.ellipse(x + 2, y + 2.4, 5, 1.4, C.void, 0.75);
+    p.ellipse(x + 2, y + 2.2, 3.4, 0.9, C.blanketLo);
   }
 
   // 羽音の波紋（暗闇で位置を探す手がかり）
-  const pulse = (t * 1.15) % 1;
   if (!landed) {
-    p.ring(x, y, 5 + pulse * 13, 1, C.wing, 0.22 * (1 - pulse));
-    p.ring(x, y, 3 + pulse * 7, 1, C.bugRim, 0.3 * (1 - pulse));
+    const pulse = (t * 1.15) % 1;
+    if (!visible) p.ring(x, y, 6 + pulse * 12, 1, C.wing, 0.14 * (1 - pulse));
   }
 
-  // 体：暗い壁でも輪郭が読めるように、ひと回り大きいリム色を敷く
+  // 本体の明度：月明かりの中では明るく、暗がりではシルエット
   const body = visible ? C.bugHi : C.bug;
-  const rim = visible ? C.wingHi : C.bugEye;
-  p.ellipse(x, y, 5.4, 2.9, C.bugRim);
-  p.ellipse(x + 4.2, y - 1.1, 2.6, 2.4, C.bugRim);
-  p.ellipse(x, y, 4.4, 2.1, C.bug);
-  p.ellipse(x - 0.4, y - 0.3, 3.6, 1.5, body);
-  // 頭
-  p.circle(x + 4.2, y - 1.1, 1.7, body);
-  p.px(x + 4, y - 2, C.bugEye);
-  // 口吻
-  p.line(x + 5, y - 0.4, x + 9, y + 0.8, C.bug);
-  // 腹部の縞
-  p.px(x - 1, y + 0.4, C.bug);
-  p.px(x - 2.5, y + 0.3, C.bug);
+  const bodyHi = visible ? C.wing : C.bugHi;
 
-  if (landed) {
-    // 着地：羽をたたみ、脚を出す
-    p.line(x - 1, y + 1.4, x - 3, y + 3.6, C.bug);
-    p.line(x + 1, y + 1.6, x + 0.5, y + 3.8, C.bug);
-    p.line(x + 3, y + 1.2, x + 4.5, y + 3.2, C.bug);
-    p.line(x - 2, y - 0.6, x - 4.5, y + 0.6, C.bug);
-    p.line(x + 3.4, y - 1.8, x + 5.4, y - 3.2, C.bug);
-    p.line(x + 2.6, y - 2.2, x + 3.6, y - 4.2, C.bug);
-    // たたんだ羽
-    p.ellipse(x - 1.4, y - 1.5, 3.2, 1.1, C.wing, 0.95);
-    p.px(x + 2, y - 3, rim);
-  } else {
-    // 羽ばたき：2コマのブラー
-    const up = Math.sin(m.wing) > 0;
-    const wy = up ? -3.4 : -1.6, spread = up ? 1.5 : 3.4;
-    p.ellipse(x - 0.5, y + wy, 4.6, spread, C.wing, up ? 0.95 : 0.6);
-    p.ellipse(x - 0.5, y + wy - 1, 3.4, 0.6, C.wingHi, up ? 0.5 : 0.25);
-    // 脚
-    p.line(x - 0.5, y + 1.6, x - 2.4, y + 3.4, C.bug);
-    p.line(x + 1.2, y + 1.4, x + 2.4, y + 3.2, C.bug);
+  // ---- 胴（腹部 → 胸 → 頭）。右が頭 ----
+  p.ellipse(x - 3.8, y + 0.8, 3.6, 2.1, C.bugRim);   // 腹部の輪郭
+  p.ellipse(x - 0.4, y + 0.3, 2.6, 2.4, C.bugRim);   // 胸の輪郭
+  p.ellipse(x + 2.6, y - 0.3, 1.9, 2.0, C.bugRim);   // 頭の輪郭
+  p.ellipse(x - 3.8, y + 0.6, 2.8, 1.5, body);       // 腹部
+  p.ellipse(x - 0.4, y + 0.2, 1.9, 1.8, body);       // 胸
+  p.ellipse(x + 2.6, y - 0.3, 1.3, 1.5, bodyHi);     // 頭（やや明るく）
+  // 腹部の縞
+  p.px(x - 5.6, y + 0.6, C.bug);
+  p.px(x - 4.2, y + 0.4, C.bug);
+  p.px(x - 2.6, y + 0.6, C.bug);
+  // 目
+  p.px(x + 3, y - 1, C.bugEye);
+
+  // ---- 口吻（針）----
+  p.line(x + 3.6, y - 0.6, x + 7.6, y + 1.2, C.bug);
+  p.px(x + 7.6, y + 1.2, C.bugRim);
+  // 触角
+  p.line(x + 3.2, y - 2, x + 5.2, y - 3.4, C.bugRim, 0.8);
+  p.line(x + 2.6, y - 2.2, x + 3.4, y - 4, C.bugRim, 0.6);
+
+  // ---- 脚（6本）----
+  const legs = landed
+    ? [
+        [1.4, 1.4, 2.4, 2.8, 3.2, 3.4],
+        [0.0, 1.8, -0.6, 3.2, 0.2, 3.8],
+        [-2.2, 1.6, -3.4, 3.0, -3.8, 3.6],
+        [2.2, 0.6, 4.0, 1.6, 5.0, 2.6],
+      ]
+    : [
+        [1.4, 1.4, 2.2, 2.6, 3.0, 3.6],
+        [0.0, 1.8, -0.4, 3.0, 0.0, 4.2],
+        [-2.2, 1.6, -3.2, 2.8, -3.6, 4.0],
+        [2.2, 0.6, 3.8, 1.4, 4.8, 2.4],
+      ];
+  for (const [ax, ay, bx, by, cx2, cy2] of legs) {
+    p.line(x + ax, y + ay, x + bx, y + by, C.bug);
+    p.line(x + bx, y + by, x + cx2, y + cy2, C.bugRim);
   }
 
-  // ねらえる瞬間の合図（小さな十字）
-  if (hittableNow) {
-    const a = 0.5 + Math.sin(t * 18) * 0.3;
-    p.dot(x - 6, y - 5, C.wingHi, a);
-    p.dot(x + 7, y - 5, C.wingHi, a);
-    p.dot(x - 6, y + 5, C.wingHi, a);
-    p.dot(x + 7, y + 5, C.wingHi, a);
+  const flap = Math.sin(m.wing * 2);
+
+  // ---- 羽（2枚）: 胸から後ろ上へ ----
+  if (landed) {
+    // たたんだ羽：背中に沿わせる
+    p.place(x - 0.4, y - 1.3, false, Math.PI + 0.16);
+    p.ellipse(3.0, 0, 3.4, 1.5, C.wing, 0.45);
+    p.ellipse(3.2, -0.4, 3.0, 0.5, C.wingHi, 0.5);
+    p.place(0, 0);
+  } else {
+    const up = flap > 0;
+    for (const side of [0, 1]) {
+      const ang = Math.PI + (up ? 0.72 : 0.34) + side * 0.22;
+      p.place(x - 0.4, y - 1.2 - side * 0.6, false, ang);
+      p.ellipse(3.0, 0, 3.2, side ? 1.3 : 1.8, C.wing, side ? 0.3 : 0.42);
+      p.ellipse(3.2, -0.6, 2.4, 0.5, C.wingHi, side ? 0.26 : 0.4);
+      p.place(0, 0);
+    }
+    // 羽の残像（下側の弧）
+    p.place(x - 0.4, y - 1.2, false, Math.PI + 0.06);
+    p.ellipse(3.4, 0, 3.4, 0.7, C.wing, 0.14);
+    p.place(0, 0);
+  }
+
+  // ネラえる合図：体のまわりが少しだけ脈打つ（点は打たない）
+  if (hittableNow && (hover || landed)) {
+    const a = 0.25 + Math.sin(t * 16) * 0.2;
+    p.ring(x + 1, y + 0.4, 7.5, 1, C.wingHi, a * 0.5);
   }
   // 光の帯の中ではリムライト
   if (visible) {
-    p.px(x - 0.4, y - 2.2, C.wingHi);
-    p.px(x + 2, y - 2, rim);
+    p.px(x - 0.6, y - 1.6, C.wingHi);
+    p.px(x + 1.8, y - 1.8, C.wing);
   }
 }

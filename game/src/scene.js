@@ -10,6 +10,7 @@
 
 import { createFrame, hex, mix } from "../../vendor/pixelfx/src/core/index.js";
 import { C } from "./palette.js";
+import { HEAD_ROWS } from "./head-rows.js";
 
 export const W = 320;
 export const H = 180;
@@ -345,132 +346,59 @@ function drawBedding(tk, pal) {
  * 横向きに寝ている人。顔は上向き、鼻先は右上。
  * mood 1 で「刺された」顔（眉が寄り、口がへの字）。
  */
-// ---- 頭：上から見おろす寝顔（両目が閉じているので顔だと即座に読める）----
-const HEAD_SHAPE = { rx: 17, ry: 14.5 };
-const FACE_SHAPE = { rx: 13, ry: 10.5 };
-
-/** 楕円の内側での法線ライティング値（外なら null）。 */
-function lamAt(x, y, cx, cy, rx, ry, lx, ly) {
-  const nx = (x - cx) / rx;
-  const ny = (y - cy) / ry;
-  const d2 = nx * nx + ny * ny;
-  if (d2 > 1) return null;
-  const len = Math.hypot(nx, ny) || 1;
-  return { lam: (nx / len) * lx + (ny / len) * ly, d2 };
-}
-
-const LIGHT = { x: -0.42, y: -0.9 }; // 月明かりは左上から
+// ---- 頭：横向きに寝て、顔は壁側（＝カメラに背を向ける）。耳だけが髪から出る ----
+const HEAD_W = HEAD_ROWS[0].length;
+const HEAD_H = HEAD_ROWS.length;
+const EAR = { x: 25, y: 13 }; // スプライト内の耳の位置
 
 /**
- * 枕の上の寝顔。仰向けで顔がこちらを向き、両目は閉じている。
- * mood 1 で「刺された」顔（眉が寄り、口がへの字）。
+ * 枕の上の寝姿。呼吸で1px上下し、刺された直後は耳のあたりが赤くなる。
+ * mood 1 で「刺された」顔（＝頭がびくっと動く）。
  */
 export function drawSleeper(pIn, t, mood = 0, palParam = C) {
   const p = hexPaint(pIn);
   const pal = palParam;
   const breath = Math.sin(t * 1.1);
   const hx = BED.head.cx;
-  const hy = BED.head.cy + (breath > 0.62 ? 1 : 0);
+  const hy = BED.head.cy + (breath > 0.6 ? 1 : 0);
   const hurt = mood > 0;
-  const hrx = HEAD_SHAPE.rx;
-  const hry = HEAD_SHAPE.ry;
+  const ox = hx - Math.round(HEAD_W / 2);
+  const oy = hy - 16;
 
-  // 生え際（額の上の波打つライン）
-  const hairline = (x) => hy - 7 + Math.sin((x - hx) * 0.34) * 1.5 + clamp((x - hx) * 0.16, -1.5, 1.5);
+  // 枕への接触影（べた塗り。ディザの半透明は使わない）
+  p.ellipse(hx + 1, hy + 13, 20, 5, pal.pillowDeep);
+  p.ellipse(hx + 2, hy + 13, 14, 3, pal.pillowLo);
+  // 枕に散る毛先
+  p.ellipse(hx - 9, hy + 12, 9, 3, pal.hair);
+  p.ellipse(hx - 11, hy + 13, 6, 2, pal.hairLo);
 
-  // 枕への接触影
-  p.ellipse(hx + 1, hy + 12, 19, 4, pal.pillowDeep);
-  p.ellipse(hx + 2, hy + 13, 14, 2, pal.shadow, 0.5);
-  // 枕に広がる毛先
-  p.ellipse(hx - 1, hy + 11, 17, 5, pal.hair);
-  p.ellipse(hx - 3, hy + 12, 12, 3, pal.hairLo);
+  // 頭（スプライト）
+  p.sprite(
+    HEAD_ROWS,
+    { "#": pal.voidLine ?? pal.shadow, H: pal.hair, h: pal.hairHi, k: pal.hairLo, S: pal.skin, d: pal.skinLo, D: pal.skinDeep },
+    ox,
+    oy + (hurt ? 1 : 0),
+  );
 
-  // ---- 頭（髪の地）----
-  for (let y = hy - 17; y <= hy + 15; y++)
-    for (let x = hx - 19; x <= hx + 19; x++) {
-      const r = lamAt(x, y, hx, hy - 1, hrx, hry, LIGHT.x, LIGHT.y);
-      if (!r) continue;
-      p.put(x, y, r.lam > 0.3 ? pal.hairHi : r.lam > -0.4 ? pal.hair : pal.hairLo);
-    }
+  // 枕のふくらみ（頭の下で少しだけ手前に出る）
+  p.ellipse(hx + 3, hy + 16, 15, 3, pal.pillow);
+  p.ellipse(hx + 3, hy + 15, 12, 1.4, pal.pillowHi);
+  p.ellipse(hx + 3, hy + 17, 14, 1.6, pal.pillowLo);
 
-  // ---- 顔（額から頬まで）----
-  for (let y = hy - 9; y <= hy + 12; y++)
-    for (let x = hx - 14; x <= hx + 14; x++) {
-      const r = lamAt(x, y, hx, hy + 1, FACE_SHAPE.rx, FACE_SHAPE.ry, LIGHT.x, LIGHT.y);
-      if (!r) continue;
-      if (y < hairline(x)) continue;
-      let c = r.lam > 0.34 ? pal.skinHi : r.lam > -0.25 ? pal.skin : pal.skinLo;
-      if (r.d2 > 0.82) c = pal.skinLo;
-      if (r.d2 > 0.95) c = pal.skinDeep;
-      p.put(x, y, c);
-    }
-  // 頬の明るみ・こめかみの陰
-  p.ellipse(hx - 6, hy + 2, 4, 2.5, pal.skinHi);
-  p.ellipse(hx + 6, hy + 2, 3, 2, pal.skinHi);
-  p.put(hx - 11, hy + 1, pal.skinLo);
+  // 耳のふちを月明かりで拾う
+  const ex = ox + EAR.x, ey = oy + EAR.y + (hurt ? 1 : 0);
+  p.put(ex - 4, ey - 3, pal.skinHi);
+  p.put(ex - 4, ey - 2, pal.skinHi);
+  p.put(ex + 3, ey + 1, pal.skinLo);
 
-  // ---- 前髪（生え際から額へ垂れる）----
-  for (let x = hx - 16; x <= hx + 16; x++) {
-    let ty = null;
-    for (let y = hy - 16; y <= hy + 2; y++)
-      if (lamAt(x, y, hx, hy - 1, hrx, hry, LIGHT.x, LIGHT.y)) {
-        ty = y;
-        break;
-      }
-    if (ty === null) continue;
-    const edge = Math.round(hairline(x));
-    for (let y = ty; y <= edge; y++) {
-      const lit = lamAt(x, y, hx, hy - 1, hrx, hry, LIGHT.x, LIGHT.y);
-      p.put(x, y, y >= edge ? pal.hair : lit && lit.lam > 0.25 ? pal.hairHi : pal.hair);
-    }
-  }
-  // 横の髪（顔の左右を縁取る）
-  for (let y = hy + 2; y <= hy + 11; y++) {
-    const half = Math.round(hrx * Math.sqrt(Math.max(0, 1 - ((y - (hy - 1)) / hry) ** 2)));
-    for (const sgn of [-1, 1]) {
-      for (let k = 0; k < 2; k++) p.put(hx + sgn * (half - k), y, k === 0 ? pal.hairLo : pal.hair);
-    }
-  }
-
-  // ---- 閉じた目（まつ毛つき）----
-  const eye = (cx, ey) => {
-    if (hurt) {
-      p.rect(cx - 2, ey + 1, 4, 1, pal.eye);
-      p.put(cx - 3, ey, pal.eye);
-      p.put(cx + 2, ey + 2, pal.eye);
-    } else {
-      p.rect(cx - 2, ey, 4, 1, pal.eye);
-      p.put(cx - 3, ey - 1, pal.eye); // まつ毛
-      p.put(cx + 2, ey - 1, pal.eye);
-      p.put(cx - 3, ey + 1, pal.skinLo);
-      p.put(cx + 2, ey + 1, pal.skinLo);
-    }
-  };
-  eye(hx - 6, hy + 1);
-  eye(hx + 7, hy + 1);
-
-  // ---- 鼻 ----
-  p.put(hx, hy + 3, pal.skinLo);
-  p.rect(hx - 1, hy + 4, 3, 1, pal.skinLo);
-  p.put(hx - 1, hy + 4, pal.skinDeep);
-  p.put(hx + 1, hy + 5, pal.skinHi);
-
-  // ---- 口 ----
+  // 刺された：耳のまわりが赤く腫れる
   if (hurt) {
-    p.rect(hx - 3, hy + 7, 6, 1, pal.mouthIn);
-    p.put(hx - 2, hy + 8, pal.mouthIn);
-    p.put(hx + 1, hy + 8, pal.mouthIn);
-  } else {
-    p.rect(hx - 3, hy + 7, 5, 1, pal.lip);
-    p.put(hx - 4, hy + 7, pal.skinLo);
-    p.put(hx + 2, hy + 7, pal.skinLo);
-    if (breath > 0.05) p.rect(hx - 2, hy + 8, 3, 1, pal.mouthIn);
+    p.put(ex + 2, ey + 4, pal.zit);
+    p.put(ex + 3, ey + 3, pal.zit);
+    p.put(ex + 4, ey + 4, pal.zit);
   }
 
-  // ---- 顎した（首は布団に隠れる）----
-  p.rect(hx - 4, hy + 10, 9, 1, pal.skinLo);
-
-  // ---- 息（Zzz）----
+  // 息（Zzz）
   drawZzz(p, hx, hy, t);
 }
 
@@ -548,12 +476,12 @@ export function drawDuvet(pIn, t, pal) {
   // キルティングの縦線
   for (let x = 104; x < d.x1; x += 34) {
     const y0 = Math.round(duvetTop(x, t)) + 8;
-    p.line(x, y0, x + 1, d.bottom - 8, mix(pal.blanket, pal.blanketLo, 0.55), 0.55);
+    p.line(x, y0, x + 1, d.bottom - 8, mix(pal.blanket, pal.blanketLo, 0.5));
   }
   // 裾の折り返し
-  p.rect(d.x0, d.bottom - 1, d.x1 - d.x0, 1, pal.shadow, 0.6);
-  // 布団の落ち影
-  p.rect(d.x0, d.bottom, d.x1 - d.x0, 2, pal.shadow, 0.45);
+  p.rect(d.x0, d.bottom - 1, d.x1 - d.x0, 1, mix(pal.blanketLo, pal.shadow, 0.7));
+  // 布団の落ち影（ディザにすると網目に見えるのでベタ）
+  p.rect(d.x0, d.bottom, d.x1 - d.x0, 2, mix(pal.blanketLo, pal.shadow, 0.88));
 }
 
 // ---------------------------------------------------------------- 環境
@@ -579,13 +507,15 @@ const pal_warmHi = hex("#fff0b8");
  * "blanket" / "pillow" は安全。y は布団の稜線に沿わせる。
  */
 function makeSpots(hx, hy) {
+  const earX = hx + (EAR.x - Math.round(HEAD_W / 2));
+  const earY = hy - 16 + EAR.y;
   const spots = [
-    // 顔まわり（危険）
-    { x: hx - 5, y: hy + 2, kind: "skin" },
-    { x: hx + 6, y: hy + 3, kind: "skin" },
-    { x: hx - 1, y: hy + 6, kind: "skin" },
-    { x: hx + 3, y: hy - 3, kind: "skin" },
-    { x: hx - 12, y: hy + 1, kind: "skin" },
+    // 耳とそのまわり（危険）
+    { x: earX, y: earY, kind: "skin" },
+    { x: earX + 2, y: earY + 3, kind: "skin" },
+    { x: earX - 1, y: earY - 3, kind: "skin" },
+    { x: earX + 3, y: earY - 2, kind: "skin" },
+    { x: earX - 14, y: earY + 8, kind: "skin" },
   ];
   // 布団の稜線（安全）
   for (let x = 92; x <= 296; x += 26) {
