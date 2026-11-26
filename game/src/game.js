@@ -1104,6 +1104,8 @@ export function createGame({ seed = 3 } = {}) {
 
   function drawCutscene(p, frame) {
     const t = g.cut.t;
+    // 文字が障子や窓に重なっても読めるように、帯を敷く（顔は隠さない）
+    if (t > 0.06) blendRect(frame, 34, 34, W - 34, 70, C.void, 0.5 * Math.min(1, (t - 0.06) / 0.2));
     const w = g.world;
     if (g.cut.kind === "woke") {
       drawWakeFx(p, t);
