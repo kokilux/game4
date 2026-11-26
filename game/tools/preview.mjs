@@ -12,7 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { composite, createFrame, painterFor } from "../../vendor/pixelfx/src/core/index.js";
 import { encodePNG } from "../../vendor/pixelfx/tools/lib/png.mjs";
-import { stageWorld, drawSleeper } from "../src/scene.js";
+import { stageWorld, drawSleeperBase, drawSleeperHead } from "../src/scene.js";
 import { createGame } from "../src/game.js";
 import { createHand, drawHand } from "../src/hand.js";
 
@@ -57,8 +57,9 @@ if (args.scene) {
   frame.color.set(w.frame.color);
   const p = painterFor(frame);
   w.drawAmbient(p, tt);
-  drawSleeper(p, tt, Number(args.mood ?? 0), w.pal);
-  w.drawOver(p, tt);
+  drawSleeperBase(p, tt, w.pal);
+  if (w.drawOver) w.drawOver(p, tt);
+  drawSleeperHead(p, tt, Number(args.mood ?? 0), w.pal);
   console.log(save("scene", frame, `s${idx}`));
   process.exit(0);
 }

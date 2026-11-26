@@ -2,6 +2,7 @@
 // 叩くと「振りかぶって（予備動作）→弧を描いて→当たって→つぶれて（スカッシュ）→戻る」。
 // 12原則のうち 2 予備動作 / 5 フォロースルー / 6 スローイン・スローアウト / 7 弧 / 1 つぶれ・伸び をここで担当。
 
+import { mix } from "../../vendor/pixelfx/src/core/index.js";
 import { C } from "./palette.js";
 import { lerp, clamp01, easeOutCubic, easeInQuad } from "./draw.js";
 import { surfaceY } from "./scene.js";
@@ -117,24 +118,24 @@ const HAND_OPEN = [
   "....#SSSS#SSSS#SSSS#HHH#",
   "....#SSSS#SSSS#SSSS#SSS#",
   "....#SSSSSSSSSSSSSS#SSS#",
-  "...##HHHHHHHHHHHHHHHHHL#",
-  ".##LLLLLLLLLLLLLLLLLL##.",
+  "...##HHHHSHHHHSHHHHLHHH#",
+  ".##SSLLLLSLLLLSLLLLLL##.",
   "#SSSSSSLSSSSSSSSSSSSL#..",
   "SSSSSSSLSSSSSSSSSSSSSL#.",
   "SSSSSSSLSSSSSSSSSSSSSL#.",
   "SSSSSSSLSSSSSSSSSSSSSL#.",
   "#SSSSSSLSSSSSSSSSSSSSL#.",
   ".#SSSSSSSSSSSSSSSSSSSL#.",
-  "..#SSSSSSSSSSSSSSSSSL#..",
-  "...##SSSSSSSSSSSSSSSL#..",
+  "..###SSSSSSSSSSSSSSSL#..",
+  "....#SSSSSSSSSSSSSSSL#..",
   ".....#LLLLLLLLLLLLLL#...",
   "......##LLLLLLLLLL##....",
-  "........#WWWWWWWW#......",
-  ".......#LLLLLLLLLL#.....",
-  ".......#WWWWWWWWWW#.....",
-  ".......#WWWWWWWWWW#.....",
+  "........##WWWWWW##......",
+  "........#LLLLLLLL#......",
   "........#WWWWWWWW#......",
   ".........#WWWWWW#.......",
+  "..........#WWWW#........",
+  "...........####.........",
 ];
 
 const HAND_FLAT = [
@@ -146,24 +147,24 @@ const HAND_FLAT = [
   "....#SSSS#SSSS#SSSS#HHH#",
   "....#SSSS#SSSS#SSSS#SSS#",
   "....#SSSSSSSSSSSSSS#SSS#",
-  "...##HHHHHHHHHHHHHHHHHL#",
-  ".##LLLLLLLLLLLLLLLLLL##.",
+  "...##HHHHSHHHHSHHHHLHHH#",
+  ".##SSLLLLSLLLLSLLLLLL##.",
   "#SSSSSSLSSSSSSSSSSSSL#..",
   "SSSSSSSLSSSSSSSSSSSSSL#.",
   "SSSSSSSLSSSSSSSSSSSSSL#.",
   "SSSSSSSLSSSSSSSSSSSSSL#.",
   "#SSSSSSLSSSSSSSSSSSSSL#.",
   ".#SSSSSSSSSSSSSSSSSSSL#.",
-  "..#SSSSSSSSSSSSSSSSSL#..",
-  "...##SSSSSSSSSSSSSSSL#..",
+  "..###SSSSSSSSSSSSSSSL#..",
+  "....#SSSSSSSSSSSSSSSL#..",
   ".....#LLLLLLLLLLLLLL#...",
   "......##LLLLLLLLLL##....",
-  "........#WWWWWWWW#......",
-  ".......#LLLLLLLLLL#.....",
-  ".......#WWWWWWWWWW#.....",
-  ".......#WWWWWWWWWW#.....",
+  "........##WWWWWW##......",
+  "........#LLLLLLLL#......",
   "........#WWWWWWWW#......",
   ".........#WWWWWW#.......",
+  "..........#WWWW#........",
+  "...........####.........",
 ];
 
 const HAND_PALM = { x: 12, y: 17 }; // 手のひらの中心（スプライト内）
@@ -181,8 +182,9 @@ export function drawHand(p, h, t) {
 
   // 布団の上にいるときだけ、手のすぐ下に影を落とす
   if (cy > 96) {
-    p.ellipse(cx + 8, cy + 17, 10 * sx, 2.4, C.void, 0.5);
-    p.ellipse(cx + 8, cy + 17, 7.5 * sx, 1.6, C.blanketLo);
+    // 半透明のディザ影は「水たまり」に見えるので、ベタの中間色で置く
+    p.ellipse(cx + 8, cy + 17, 10 * sx, 2.2, mix(C.void, C.blanketLo, 0.55));
+    p.ellipse(cx + 8, cy + 17, 7.5 * sx, 1.4, C.blanketLo);
   }
 
   const pal = { "#": C.handLine, S: C.hand, H: C.handHi, L: C.handLo, W: C.handWrist };

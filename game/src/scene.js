@@ -10,7 +10,7 @@
 
 import { createFrame, hex, mix } from "../../vendor/pixelfx/src/core/index.js";
 import { C } from "./palette.js";
-import { HEAD_ROWS } from "./head-rows.js";
+import { HEAD_ROWS, HEAD_ANCHOR, HEAD_EAR } from "./head-rows.js";
 
 export const W = 320;
 export const H = 180;
@@ -107,8 +107,8 @@ function toolkit(f) {
 export const BED = {
   pillow: { x: 20, y: 110, w: 82, h: 24, r: 7 },
   mattress: { x: 16, y: 130, w: 292, h: 40, r: 6 },
-  duvet: { x0: 72, x1: 308, bottom: 164 },
-  head: { cx: 63, cy: 103 },
+  duvet: { x0: 62, x1: 308, bottom: 164 },
+  head: { cx: 58, cy: 110 }, // 顔の中心（スプライトのアンカー）
 };
 
 /**
@@ -116,8 +116,8 @@ export const BED = {
  * 蚊の着地点もこの線の上になる。
  */
 export function bedTop(x) {
-  if (x <= BED.duvet.x0) return 112;
-  if (x < 94) return lerp(112, 103, (x - BED.duvet.x0) / 22); // 肩
+  if (x <= BED.duvet.x0) return 121;
+  if (x < 94) return lerp(121, 103, (x - BED.duvet.x0) / 32); // 肩（頭の下に潜り込む）
   if (x < 134) return lerp(103, 108, (x - 94) / 40); // 二の腕のくぼみ
   if (x < 182) return 108 - Math.sin(((x - 134) / 48) * Math.PI) * 1.2; // 腰
   if (x < 234) return lerp(108, 101, (x - 182) / 52); // 尻から腿
@@ -347,88 +347,125 @@ function drawBedding(tk, pal) {
  * mood 1 で「刺された」顔（眉が寄り、口がへの字）。
  */
 // ---- 頭：横向きに寝て、顔は壁側（＝カメラに背を向ける）。耳だけが髪から出る ----
+/** 4〜5px の Z を1文字ぶん描く（上辺・下辺・斜め）。 */
+function putZ(p, x, y, s, col) {
+  for (let i = 0; i < s; i++) {
+    p.put(x + i, y, col);
+    p.put(x + i, y + s - 1, col);
+  }
+  for (let i = 1; i < s - 1; i++) {
+    const dx = Math.round((1 - i / (s - 1)) * (s - 1));
+    p.put(x + dx, y + i, col);
+  }
+}
+
+/** 寝息（Zzz）。頭の右斜め上へ、3つが順に流れる。 */
+function drawZzz(p, hx, hy, t) {
+  for (let i = 0; i < 3; i++) {
+    const k = (t * 0.4 + i / 3) % 1;
+    const s = i === 2 ? 5 : 4;
+    const x = Math.round(hx + 14 + k * 14 + Math.sin(k * 5 + i) * 1.6);
+    const y = Math.round(hy - 10 - k * 20);
+    const fade = Math.min(k * 5, (1 - k) * 4);
+    if (fade < 0.3) continue;
+    putZ(p, x, y, s, fade > 0.75 ? C.text : C.textDim);
+  }
+}
+
 const HEAD_W = HEAD_ROWS[0].length;
 const HEAD_H = HEAD_ROWS.length;
-const EAR = { x: 25, y: 13 }; // スプライト内の耳の位置
+const HEAD_PAL = (pal) => ({
+  "#": pal.voidLine ?? pal.shadow,
+  H: pal.hair,
+  h: pal.hairHi,
+  k: pal.hairLo,
+  S: pal.skin,
+  s: pal.skinLo,
+  d: pal.skinDeep,
+  b: pal.brow,
+  E: pal.eye,
+  N: pal.skinDeep,
+  M: pal.mouth,
+});
 
-/**
- * 枕の上の寝姿。呼吸で1px上下し、刺された直後は耳のあたりが赤くなる。
- * mood 1 で「刺された」顔（＝頭がびくっと動く）。
- */
-export function drawSleeper(pIn, t, mood = 0, palParam = C) {
+/** 頭の位置（スプライトの左上）。 */
+function headOrigin(t, mood) {
+  const breath = Math.sin(t * 1.1) > 0.6 ? 1 : 0;
+  const shake = mood > 0 ? 1 : 0;
+  return { x: BED.head.cx - HEAD_ANCHOR.x, y: BED.head.cy - HEAD_ANCHOR.y + breath + shake };
+}
+
+/** 枕と、枕の上に散った髪。布団より先に描く（＝布団の下）。 */
+export function drawSleeperBase(pIn, t, pal) {
   const p = hexPaint(pIn);
-  const pal = palParam;
-  const breath = Math.sin(t * 1.1);
-  const hx = BED.head.cx;
-  const hy = BED.head.cy + (breath > 0.6 ? 1 : 0);
-  const hurt = mood > 0;
-  const ox = hx - Math.round(HEAD_W / 2);
-  const oy = hy - 16;
-
+  const { x: hx, y: hy } = BED.head;
   // 枕への接触影（べた塗り。ディザの半透明は使わない）
-  p.ellipse(hx + 1, hy + 13, 20, 5, pal.pillowDeep);
-  p.ellipse(hx + 2, hy + 13, 14, 3, pal.pillowLo);
+  p.ellipse(hx + 1, hy + 9, 21, 5, pal.pillowDeep);
+  p.ellipse(hx + 2, hy + 9, 15, 3, pal.pillowLo);
   // 枕に散る毛先
-  p.ellipse(hx - 9, hy + 12, 9, 3, pal.hair);
-  p.ellipse(hx - 11, hy + 13, 6, 2, pal.hairLo);
-
-  // 頭（スプライト）
-  p.sprite(
-    HEAD_ROWS,
-    { "#": pal.voidLine ?? pal.shadow, H: pal.hair, h: pal.hairHi, k: pal.hairLo, S: pal.skin, d: pal.skinLo, D: pal.skinDeep },
-    ox,
-    oy + (hurt ? 1 : 0),
-  );
-
+  p.ellipse(hx - 11, hy + 12, 9, 3, pal.hair);
+  p.ellipse(hx - 13, hy + 13, 6, 2, pal.hairLo);
   // 枕のふくらみ（頭の下で少しだけ手前に出る）
   p.ellipse(hx + 3, hy + 16, 15, 3, pal.pillow);
   p.ellipse(hx + 3, hy + 15, 12, 1.4, pal.pillowHi);
   p.ellipse(hx + 3, hy + 17, 14, 1.6, pal.pillowLo);
-
-  // 耳のふちを月明かりで拾う
-  const ex = ox + EAR.x, ey = oy + EAR.y + (hurt ? 1 : 0);
-  p.put(ex - 4, ey - 3, pal.skinHi);
-  p.put(ex - 4, ey - 2, pal.skinHi);
-  p.put(ex + 3, ey + 1, pal.skinLo);
-
-  // 刺された：耳のまわりが赤く腫れる
-  if (hurt) {
-    p.put(ex + 2, ey + 4, pal.zit);
-    p.put(ex + 3, ey + 3, pal.zit);
-    p.put(ex + 4, ey + 4, pal.zit);
-  }
-
-  // 息（Zzz）
-  drawZzz(p, hx, hy, t);
 }
 
-function drawZzz(p, hx, hy, t) {
-  const cycle = (t * 0.42) % 1;
-  const zs = [
-    { a: 0, s: 1 },
-    { a: 0.36, s: 2 },
-    { a: 0.68, s: 3 },
-  ];
-  for (const z of zs) {
-    const k = (cycle - z.a + 1) % 1;
-    if (k > 0.62) continue;
-    const u = k / 0.62;
-    const alpha = u < 0.2 ? u / 0.2 : 1 - (u - 0.2) / 0.8;
-    if (alpha <= 0.05) continue;
-    const x = Math.round(hx + 14 + Math.sin(u * 3.1) * 4 + u * 14);
-    const y = Math.round(hy - 20 - u * 26);
-    pixelZ(p, x, y, z.s, pal_zzz, alpha);
-  }
-}
+/** 顔（布団より後に描く＝布団の手前）。呼吸で1px上下する。
+ * expr: "sleep" | "happy" | "ouch"（クリア／失敗の演出で切り替える） */
+export function drawSleeperHead(pIn, t, mood = 0, palParam = C, expr = "sleep", shakeX = 0) {
+  const p = hexPaint(pIn);
+  const pal = palParam;
+  const base = headOrigin(t, mood);
+  const ox = base.x + Math.round(shakeX);
+  const oy = base.y;
+  p.sprite(HEAD_ROWS, HEAD_PAL(pal), ox, oy);
 
-const pal_zzz = hex("#cfc6e8");
-function pixelZ(p, x, y, s, c, a) {
-  const w = s + 2;
-  for (let i = 0; i < w; i++) {
-    p.dot(x + i, y, c, a);
-    p.dot(x + (w - 1 - i), y + i, c, a);
-    p.dot(x + i, y + w - 1, c, a);
+  const px = (x, y, c) => p.put(ox + x, oy + y, c);
+
+  // 月明かり：顔の左上（額と頬）をわずかに拾う
+  p.put(ox + 17, oy + 12, pal.skinHi);
+  p.put(ox + 16, oy + 13, pal.skinHi);
+
+  if (expr === "happy") {
+    // 目を ^ ^ に、口を大きく笑わせる
+    for (const x0 of [15, 23]) {
+      for (let i = 0; i < 4; i++) { px(x0 + i, 17, pal.skin); px(x0 + i, 16, pal.skin); }
+      px(x0, 17, pal.eye); px(x0 + 1, 16, pal.eye); px(x0 + 2, 16, pal.eye); px(x0 + 3, 17, pal.eye);
+      for (let i = 0; i < 4; i++) px(x0 + i, 13, pal.brow);
+    }
+    for (let x = 16; x <= 23; x++) px(x, 23, pal.skin);
+    px(16, 22, pal.mouth); px(23, 22, pal.mouth);
+    for (let x = 17; x <= 22; x++) px(x, 23, pal.mouth);
+    px(14, 20, pal.zit); px(27, 19, pal.zit); // 頬の赤み
+  } else if (expr === "ouch") {
+    // 眉を寄せ、目をぎゅっと閉じ、口を開ける
+    for (let x = 15; x <= 26; x++) { px(x, 13, pal.skin); px(x, 14, pal.skin); }
+    px(15, 15, pal.brow); px(16, 14, pal.brow); px(17, 14, pal.brow); px(18, 14, pal.brow);
+    px(23, 14, pal.brow); px(24, 14, pal.brow); px(25, 14, pal.brow); px(26, 15, pal.brow);
+    for (const x0 of [15, 23]) {
+      for (let i = 0; i < 4; i++) { px(x0 + i, 17, pal.skin); px(x0 + i, 16, pal.skin); }
+      px(x0, 16, pal.eye); px(x0 + 1, 17, pal.eye); px(x0 + 2, 17, pal.eye); px(x0 + 3, 16, pal.eye);
+    }
+    for (let x = 17; x <= 22; x++) { px(x, 22, pal.skin); px(x, 23, pal.skin); px(x, 24, pal.skin); }
+    px(18, 22, pal.mouth); px(21, 22, pal.mouth);
+    px(19, 23, pal.mouth); px(20, 23, pal.mouth);
+    px(19, 24, pal.mouth); px(20, 24, pal.mouth);
+    px(29, 18, pal.skinHi); px(29, 19, pal.skinHi); // 汗
   }
+
+  // 刺された：頬が赤く腫れる（3点）
+  if (mood > 0) {
+    const zx = ox + 27, zy = oy + 20;
+    p.put(zx, zy, pal.zit);
+    p.put(zx + 1, zy, pal.zit);
+    p.put(zx - 1, zy + 1, pal.zit);
+    p.put(zx + 2, zy + 1, pal.zit);
+    p.put(zx, zy + 2, pal.zit);
+  }
+
+  // 息（Zzz）— 起きた／刺されたあとは出さない
+  if (expr === "sleep" && mood === 0) drawZzz(p, ox + HEAD_ANCHOR.x, oy + HEAD_ANCHOR.y, t);
 }
 
 // ---------------------------------------------------------------- 掛け布団
@@ -442,13 +479,12 @@ function duvetTop(x, t) {
 }
 
 export function drawDuvet(pIn, t, pal) {
+  // 以前は600頂点の poly() で塗っていたが、poly は「バウンディングボックス × 頂点数」の
+  // 総当たりなので 1フレーム 12M 回の判定になり、ここだけで 50ms かかっていた。
+  // 掛け布団は列ごとの高さで決まる形なので、列ごとの rect で塗る（同じ絵で 10倍以上速い）。
   const p = hexPaint(pIn);
   const d = BED.duvet;
-  const pts = [];
-  for (let x = d.x0; x <= d.x1; x += 1) pts.push([x, Math.round(duvetTop(x, t))]);
-  for (let x = d.x1; x >= d.x0; x -= 1) pts.push([x, d.bottom]);
-  p.poly(pts, pal.blanket);
-
+  const blanket = toColor(pal.blanket);
   const cTop = mix(pal.blanketHi, pal.blanket, 0.25);
   const cMid = mix(pal.blanket, pal.blanketLo, 0.4);
   const cBot = mix(pal.blanket, pal.blanketLo, 0.78);
@@ -465,8 +501,9 @@ export function drawDuvet(pIn, t, pal) {
     p.rect(x, y0, 1, 1, cTop);
     p.rect(x, y0 + 1, 1, 2, pal.blanketHi);
     if (x > 78 && x < 116) p.rect(x, y0 + 3, 1, 1, pal.sheetFold);
-    // 本体
-    p.rect(x, b1, 1, b2 - b1, pal.blanket);
+    // 本体（稜線の下から帯ごとに）
+    p.rect(x, y0 + 3, 1, b1 - (y0 + 3), blanket);
+    p.rect(x, b1, 1, b2 - b1, blanket);
     p.rect(x, b2, 1, b3 - b2, cMid);
     p.rect(x, b3, 1, d.bottom - 3 - b3, cBot);
     // 接地
@@ -507,15 +544,17 @@ const pal_warmHi = hex("#fff0b8");
  * "blanket" / "pillow" は安全。y は布団の稜線に沿わせる。
  */
 function makeSpots(hx, hy) {
-  const earX = hx + (EAR.x - Math.round(HEAD_W / 2));
-  const earY = hy - 16 + EAR.y;
+  // 顔のパーツ（スプライト座標 → 画面座標）。ここに降りると刺される。
+  const ox = hx - HEAD_ANCHOR.x;
+  const oy = hy - HEAD_ANCHOR.y;
+  const face = (sx, sy) => ({ x: ox + sx, y: oy + sy, kind: "skin" });
   const spots = [
-    // 耳とそのまわり（危険）
-    { x: earX, y: earY, kind: "skin" },
-    { x: earX + 2, y: earY + 3, kind: "skin" },
-    { x: earX - 1, y: earY - 3, kind: "skin" },
-    { x: earX + 3, y: earY - 2, kind: "skin" },
-    { x: earX - 14, y: earY + 8, kind: "skin" },
+    face(26, 20),  // 頬
+    face(17, 13),  // こめかみ
+    face(21, 24),  // あご
+    face(21, 20),  // 鼻のあたり
+    face(HEAD_EAR.x + 1, HEAD_EAR.y), // 耳
+    face(28, 15),  // 目じり
   ];
   // 布団の稜線（安全）
   for (let x = 92; x <= 296; x += 26) {
@@ -524,8 +563,8 @@ function makeSpots(hx, hy) {
     spots.push({ x: px, y: Math.round(bedTop(px)) - 1, kind: "blanket" });
   }
   // 枕（安全）
-  spots.push({ x: 30, y: 110, kind: "pillow" });
-  spots.push({ x: 44, y: 108, kind: "pillow" });
+  spots.push({ x: 30, y: 112, kind: "pillow" });
+  spots.push({ x: 44, y: 110, kind: "pillow" });
   return spots;
 }
 
@@ -590,6 +629,7 @@ function buildWashitsu() {
     bugs: 5,
     speed: 1.0,
     spotBias: 0.3,
+    grace: 1.0,
     pal,
     frame,
     floor: "tatami",
@@ -656,6 +696,7 @@ function buildYoshitsu() {
     bugs: 6,
     speed: 1.12,
     spotBias: 0.38,
+    grace: 0.86,
     pal,
     frame,
     floor: "wood",
@@ -733,6 +774,7 @@ function buildNatsu() {
     bugs: 7,
     speed: 1.22,
     spotBias: 0.46,
+    grace: 0.74,
     pal,
     frame,
     floor: "tatami",

@@ -118,7 +118,8 @@ export function updateMosquito(m, dt, ctx) {
       m.t = 0;
       m.x = m.spot.x;
       m.y = m.spot.y;
-      m.landTimer = (m.spot.kind === "skin" ? 1.0 : 1.5) / m.speed; // 奥の夜ほど短い
+      // 着地してから刺されるまでの猶予。夜を追うごとに短くなる（ステージ側の grace）
+      m.landTimer = ((m.spot.kind === "skin" ? 1.0 : 1.5) * (world.grace ?? 1)) / m.speed;
       m.vx = 0; m.vy = 0;
     }
   } else if (m.state === "land") {
@@ -198,12 +199,12 @@ export function drawMosquito(p, m, t, world) {
 
   // 羽音の波紋（暗闇で位置を探す手がかり）
   // 半透明のリングはディザで「点々」になり、埃に見える。四方向の短い線で描く。
-  if (!landed) {
+  if (!landed && !visible) {
     const pulse = (t * 1.15) % 1;
-    const r = 6 + pulse * 9;
-    const col = visible ? mix(C.void, C.wing, 0.5) : mix(C.void, C.wing, 0.3);
+    const r = 5 + pulse * 5;
+    const col = mix(C.void, C.wing, 0.34);
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      p.line(x + dx * r * 0.62, y + dy * r * 0.5, x + dx * r, y + dy * r * 0.8, col);
+      p.line(x + dx * r * 0.7, y + dy * r * 0.6, x + dx * r, y + dy * r * 0.8, col);
     }
   }
 
@@ -212,43 +213,53 @@ export function drawMosquito(p, m, t, world) {
   const bodyHi = visible ? C.wing : C.bugHi;
 
   // ---- 胴（腹部 → 胸 → 頭）。右が頭 ----
-  p.ellipse(x - 3.8, y + 0.8, 3.6, 2.1, C.bugRim);   // 腹部の輪郭
-  p.ellipse(x - 0.4, y + 0.3, 2.6, 2.4, C.bugRim);   // 胸の輪郭
-  p.ellipse(x + 2.6, y - 0.3, 1.9, 2.0, C.bugRim);   // 頭の輪郭
-  p.ellipse(x - 3.8, y + 0.6, 2.8, 1.5, body);       // 腹部
-  p.ellipse(x - 0.4, y + 0.2, 1.9, 1.8, body);       // 胸
-  p.ellipse(x + 2.6, y - 0.3, 1.3, 1.5, bodyHi);     // 頭（やや明るく）
-  // 腹部の縞
-  p.px(x - 5.6, y + 0.6, C.bug);
-  p.px(x - 4.2, y + 0.4, C.bug);
-  p.px(x - 2.6, y + 0.6, C.bug);
-  // 目
-  p.px(x + 3, y - 1, C.bugEye);
+  // 輪郭を bugRim でしっかり取り、内側を body で塗る（暗がりでも形が読える）。
+  // 腹部は先細り：後ろへ行くほど細く、先端は1pxの針。
+  const rear = 6.2;
+  for (let i = 0; i < 5; i++) {
+    const k = i / 4;                        // 0=尾 1=胸
+    const rx = 1.1 + k * 1.5;
+    const ry = 0.7 + k * 1.1;
+    const cx2 = x - rear + k * (rear - 1.4);
+    const cy2 = y + 0.9 - k * 0.6;
+    p.ellipse(cx2, cy2, rx, ry, C.bugRim);
+    p.ellipse(cx2, cy2 - 0.3, rx * 0.66, ry * 0.6, body);
+  }
+  // 胸
+  p.ellipse(x - 0.2, y + 0.2, 2.4, 2.3, C.bugRim);
+  p.ellipse(x - 0.2, y - 0.1, 1.7, 1.6, body);
+  // 頭
+  p.ellipse(x + 2.5, y - 0.4, 1.8, 1.8, C.bugRim);
+  p.ellipse(x + 2.5, y - 0.6, 1.2, 1.2, bodyHi);
+  // 腹の節（3本の細い帯）
+  for (let i = 0; i < 3; i++) {
+    p.px(x - 4.4 + i * 1.7, y + 1.1 - i * 0.2, C.bug);
+  }
+  // 目（頭の上側）
+  p.px(x + 3.1, y - 1.1, C.bugEye);
 
   // ---- 口吻（針）----
-  p.line(x + 3.6, y - 0.6, x + 7.6, y + 1.2, C.bug);
-  p.px(x + 7.6, y + 1.2, C.bugRim);
-  // 触角
-  p.line(x + 3.2, y - 2, x + 5.2, y - 3.4, C.bugRim, 0.8);
-  p.line(x + 2.6, y - 2.2, x + 3.4, y - 4, C.bugRim, 0.6);
+  p.line(x + 3.4, y - 0.3, x + 7.2, y + 1.4, C.bug);
+  p.px(x + 7.2, y + 1.4, C.bugRim);
+  // 触角（2本、上へ）
+  p.line(x + 3.0, y - 2.0, x + 4.8, y - 3.8, C.bugRim, 0.85);
+  p.line(x + 2.4, y - 2.2, x + 2.8, y - 4.2, C.bugRim, 0.7);
 
-  // ---- 脚（6本）----
+  // ---- 脚（3本・2関節）。膝を体の上に跳ね上げると蚊らしくなる（6本だと1pxでは蜘蛛に見える） ----
   const legs = landed
     ? [
-        [1.4, 1.4, 2.4, 2.8, 3.2, 3.4],
-        [0.0, 1.8, -0.6, 3.2, 0.2, 3.8],
-        [-2.2, 1.6, -3.4, 3.0, -3.8, 3.6],
-        [2.2, 0.6, 4.0, 1.6, 5.0, 2.6],
+        [1.4, 1.6, 2.6, 2.6, 3.4, 3.2],   // 前脚（接地）
+        [0.0, 1.9, -0.6, 2.8, -0.2, 3.8],  // 中脚
+        [-2.4, 1.7, -3.6, 2.6, -4.0, 3.4], // 後脚
       ]
     : [
-        [1.4, 1.4, 2.2, 2.6, 3.0, 3.6],
-        [0.0, 1.8, -0.4, 3.0, 0.0, 4.2],
-        [-2.2, 1.6, -3.2, 2.8, -3.6, 4.0],
-        [2.2, 0.6, 3.8, 1.4, 4.8, 2.4],
+        [1.4, 1.4, 2.6, 0.2, 3.4, 2.2],    // 前脚：膝を上げてから下ろす
+        [0.0, 1.8, -1.4, 0.6, -1.8, 3.4],  // 中脚
+        [-2.4, 1.6, -4.0, 0.4, -4.6, 3.0], // 後脚
       ];
   for (const [ax, ay, bx, by, cx2, cy2] of legs) {
-    p.line(x + ax, y + ay, x + bx, y + by, C.bug);
-    p.line(x + bx, y + by, x + cx2, y + cy2, C.bugRim);
+    p.line(x + ax, y + ay, x + bx, y + by, C.bugRim);
+    p.line(x + bx, y + by, x + cx2, y + cy2, C.bug);
   }
 
   const flap = Math.sin(m.wing * 2);
@@ -263,10 +274,10 @@ export function drawMosquito(p, m, t, world) {
   } else {
     const up = flap > 0;
     for (const side of [0, 1]) {
-      const ang = Math.PI + (up ? 0.72 : 0.34) + side * 0.22;
-      p.place(x - 0.4, y - 1.2 - side * 0.6, false, ang);
-      p.ellipse(3.0, 0, 3.2, side ? 1.3 : 1.8, C.wing, side ? 0.3 : 0.42);
-      p.ellipse(3.2, -0.6, 2.4, 0.5, C.wingHi, side ? 0.26 : 0.4);
+      const ang = Math.PI + (up ? 0.78 : 0.3) + side * 0.2;
+      p.place(x - 0.2, y - 1.2 - side * 0.7, false, ang);
+      p.ellipse(2.6, 0, 2.7, side ? 1.1 : 1.5, C.wing, side ? 0.34 : 0.46);
+      p.ellipse(2.7, -0.5, 1.9, 0.4, C.wingHi, side ? 0.3 : 0.45);
       p.place(0, 0);
     }
     // 羽の残像（下側の弧）

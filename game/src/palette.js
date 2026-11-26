@@ -49,6 +49,8 @@ const RAW = {
   hairHi: "#2e2638",
   hairLo: "#141020",
   mouth: "#6d4147",
+  brow: "#6d4a3a",
+  eye: "#3a2230",
   eye: "#3a2a33",
   zit: "#c2505c",
 

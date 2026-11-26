@@ -3,7 +3,7 @@
 
 import { createFrame, painterFor, mix } from "../../vendor/pixelfx/src/core/index.js";
 import { C, W, H } from "./palette.js";
-import { STAGES, STAGE_NAMES, stageWorld, drawSleeper } from "./scene.js";
+import { STAGES, STAGE_NAMES, stageWorld, drawSleeperBase, drawSleeperHead, BED } from "./scene.js";
 import { createMosquito, updateMosquito, drawMosquito, hittable, hitRadius, biteEta, airborne } from "./mosquito.js";
 import { createHand, aim, startSlap, updateHand, drawHand, impactPoint, canSlap, IMPACT_AT } from "./hand.js";
 import { createFxLayer } from "./fx.js";
@@ -34,6 +34,7 @@ export function createGame({ seed = 3 } = {}) {
     bugId: 0,
     splats: [],
     sparks: [],
+    cut: null, // 終わりの演出 {kind:'clear'|'dawn'|'fail', t}
     marks: [],
     hitStop: 0,
     flash: 0,
@@ -107,10 +108,13 @@ export function createGame({ seed = 3 } = {}) {
   function endStage(reason) {
     if (g.phase !== "play") return;
     g.endReason = reason;
+    g.popups.length = 0; // 直前の「PACHI!」などを残さない
+    g.sparks.length = 0;
     const w = g.world;
     if (reason === "eaten") {
       g.phase = "over";
       g.flash = 0;
+      g.cut = { kind: "fail", t: 0 };
       g.banner = "NO SLEEP";
       g.finalScore = g.score;
       g.events.push({ type: "end", reason });
@@ -118,6 +122,7 @@ export function createGame({ seed = 3 } = {}) {
     }
     // クリア or 夜明け
     const clear = reason === "clear";
+    if (clear) g.splats.length = 0; // 夜を越えたら血の跡は拭う
     const timeBonus = Math.max(0, Math.round((w.night - g.night) * 10));
     const bonus = clear ? 500 + timeBonus : 100;
     g.score += bonus;
@@ -125,9 +130,11 @@ export function createGame({ seed = 3 } = {}) {
     g.banner = clear ? "NIGHT CLEAR" : "DAWN";
     g.bannerT = clear ? `+${bonus}` : `+${bonus}`;
     g.events.push({ type: "end", reason: clear ? "clear" : "dawn" });
+    g.cut = { kind: clear ? "clear" : "dawn", t: 0, allClear: false };
 
     if (g.stageIndex >= STAGES.length - 1) {
       g.phase = "over";
+      g.cut = { kind: clear ? "clear" : "dawn", t: 0, allClear: clear };
       g.banner = clear ? "ALL CLEAR" : "DAWN";
       g.finalScore = g.score;
       return;
@@ -138,12 +145,19 @@ export function createGame({ seed = 3 } = {}) {
   }
 
   function nextStage() {
+    g.cut = null;
     loadStage(g.stageIndex + 1);
     g.phase = "play";
     g.events.push({ type: "stage", index: g.stageIndex });
   }
 
   // ---------------------------------------------------------------- 入力
+  /** 終わりの演出中は、手を画面の外へ退がらせる（笑顔を隠さない）。 */
+  function restHand() {
+    g.hand.tx = 262;
+    g.hand.ty = 206;
+  }
+
   function pointer(x, y) {
     aim(g.hand, Math.max(8, Math.min(W - 8, x)), Math.max(10, Math.min(H - 6, y)));
   }
@@ -311,12 +325,19 @@ export function createGame({ seed = 3 } = {}) {
 
     if (g.phase === "interlude") {
       g.interludeT += dt;
+      if (g.cut) g.cut.t += dt;
+      restHand();
       updateHand(g.hand, dt);
       g.fx.update(dt);
       if (g.interludeT > 2.0) nextStage();
       return;
     }
-    if (g.phase === "over") { updateHand(g.hand, dt); return; }
+    if (g.phase === "over") {
+      if (g.cut) g.cut.t += dt;
+      restHand();
+      updateHand(g.hand, dt);
+      return;
+    }
 
     if (g.hitStop > 0) { g.hitStop -= dt; return; }
 
@@ -381,7 +402,7 @@ export function createGame({ seed = 3 } = {}) {
       p.px(m.x + 1, m.y, C.zit);
       if (m.t > 0.25) { p.px(m.x, m.y + 1, C.splat); p.px(m.x + 1, m.y + 1, C.splat); }
     }
-    drawSleeper(p, g.t, g.bites > 0 ? 1 : 0, w.pal);
+    drawSleeperBase(p, g.t, w.pal);
     for (const b of g.bugs) drawMosquito(p, b, g.t, w);
     g.fx.draw(frame, "back");
     g.fx.draw(frame, "front");
@@ -389,6 +410,8 @@ export function createGame({ seed = 3 } = {}) {
     // ここで戻さないと、続く布団や手が画面外に描かれて「布団が消える」。
     p.reset();
     w.drawOver(p, g.t);
+    // 顔は布団の手前（布団の縁が頭の後ろに回る）
+    drawSleeperHead(p, g.t, g.bites > 0 && g.phase === "play" ? 1 : 0, w.pal, cutExpr(), cutShake());
     drawHand(p, g.hand, g.t);
     p.place(0, 0);
 
@@ -421,10 +444,19 @@ export function createGame({ seed = 3 } = {}) {
       text(p, msg, W / 2, H - 26, hovering ? C.warm : C.textDim, { align: "center", alpha: a });
     }
 
-    if (g.phase === "interlude") drawBanner(p, g, 0.12, frame);
+    if (g.phase === "interlude") {
+      if (g.cut && g.cut.kind === "clear") drawClearFx(p, frame, g.cut.t);
+      drawBanner(p, g, 0.12, frame);
+      // 光の粒は帯の手前（顔のまわりを舞う）
+      if (g.cut && g.cut.kind === "clear") drawSparkles(p, g.cut.t);
+    }
     if (g.phase === "over") {
-      blendRect(frame, 0, 0, W, H, C.void, 0.62);
-      drawResult(p, g);
+      const ct = g.cut ? g.cut.t : 99;
+      if (ct < CUT_HOLD) drawCutscene(p, frame);
+      else {
+        blendRect(frame, 0, 0, W, H, C.void, 0.62);
+        drawResult(p, g);
+      }
     }
   }
 
@@ -490,11 +522,98 @@ export function createGame({ seed = 3 } = {}) {
 
   function drawBanner(p, g, k, frame) {
     const a = Math.min(1, g.interludeT / 0.2) * Math.min(1, (2.0 - g.interludeT) / 0.3);
-    blendRect(frame, 40, 62, W - 40, 116, C.void, 0.72 * a);
-    text(p, g.banner ?? "", W / 2, 76, C.warm, { font: "big", align: "center", alpha: a });
-    text(p, g.bannerT ?? "", W / 2, 92, C.text, { align: "center", alpha: a });
+    // 顔（y=95〜126）を隠さないように、帯は上に置く
+    blendRect(frame, 40, 26, W - 40, 82, C.void, 0.7 * a);
+    text(p, g.banner ?? "", W / 2, 40, C.warm, { font: "big", align: "center", alpha: a });
+    text(p, g.bannerT ?? "", W / 2, 56, C.text, { align: "center", alpha: a });
     if (g.stageIndex < STAGES.length - 1) {
-      text(p, "NEXT - " + STAGE_NAMES[g.stageIndex + 1], W / 2, 104, C.textDim, { align: "center", alpha: a * 0.9 });
+      text(p, "NEXT - " + STAGE_NAMES[g.stageIndex + 1], W / 2, 68, C.textDim, { align: "center", alpha: a * 0.9 });
+    }
+  }
+
+  // ---- 終わりの演出 ------------------------------------------------
+  const CUT_HOLD = 1.9; // 演出を見せる時間（この後リザルトへ）
+
+  function cutExpr() {
+    if (!g.cut) return "sleep";
+    return g.cut.kind === "fail" ? "ouch" : "happy";
+  }
+
+  /** 失敗のときは頭が左右に揺れる（痒くてたまらない）。 */
+  function cutShake() {
+    if (!g.cut || g.cut.kind !== "fail") return 0;
+    const k = Math.min(1, g.cut.t / 0.25) * Math.max(0, 1 - g.cut.t / (CUT_HOLD + 0.4));
+    return Math.sin(g.t * 26) * 2.4 * k;
+  }
+
+  /** クリア：夜明けの光と、頭のまわりに舞う光の粒。 */
+  function drawClearFx(p, frame, t) {
+    // 夜明けの光（画面全体をわずかに暖める）
+    blendRect(frame, 0, 0, W, H, C.warm, 0.04 + Math.min(0.12, t * 0.09));
+    drawSparkles(p, t);
+  }
+
+  /** 頭のまわりを舞い上がる光の粒。 */
+  function drawSparkles(p, t) {
+    const hx = BED.head.cx, hy = BED.head.cy;
+    for (let i = 0; i < 12; i++) {
+      const k = (t * 0.5 + i / 12) % 1;
+      const x = Math.round(hx - 26 + ((i * 41) % 54) + Math.sin(i * 1.7 + t * 2) * 3);
+      const y = Math.round(hy + 8 - k * 46);
+      if (y < 6) continue;
+      const big = i % 4 === 0;
+      p.put(x, y, C.text);
+      if (big) { p.put(x - 1, y, C.warm); p.put(x + 1, y, C.warm); p.put(x, y - 1, C.warm); p.put(x, y + 1, C.warm); }
+    }
+  }
+
+  /** 失敗：頬と首に湿疹が増え、引っかき傷が走る。 */
+  function drawFailFx(p, t) {
+    const grow = Math.min(1, t / 0.9);
+    const hx = BED.head.cx, hy = BED.head.cy;
+    // 頬・あご・首すじに湿疹が増えていく（顔の輪郭の内側）
+    const spots = [[6, 8], [-7, 10], [10, 12], [-2, 14], [14, 6], [-11, 6]];
+    spots.forEach(([dx, dy], i) => {
+      const r = 0.9 + grow * (1.1 + (i % 3) * 0.45);
+      const x = hx + dx + Math.round(cutShake());
+      const y = hy + dy;
+      p.ellipse(x, y, r, r, g.world.pal.zit);
+      p.put(x, y - 1, C.zitHi ?? C.warm);
+    });
+    // かいていた手（3本の傷）
+    // かきむしる手：頬を3本の傷が滑る
+    const k = (t * 2.6) % 1;
+    if (k < 0.55) {
+      for (let i = 0; i < 3; i++) {
+        const x = Math.round(hx - 4 + k * 16) + i * 3;
+        const y = hy + 10 + i * 2;
+        p.line(x, y, x + 2, y - 3, C.skinHi);
+      }
+    }
+  }
+
+  /** 大きな文字を1文字ずつ揺らして出す。 */
+  function wobbleText(p, str, cx, cy, t, amp, color) {
+    const dy = Math.round(Math.sin(t * 16) * amp);
+    const dx = Math.round(Math.cos(t * 11) * amp * 0.5);
+    text(p, str, cx + dx + 1, cy + dy + 1, C.void, { font: "big", align: "center" });
+    text(p, str, cx + dx, cy + dy, color, { font: "big", align: "center" });
+  }
+
+  function drawCutscene(p, frame) {
+    const t = g.cut.t;
+    const w = g.world;
+    if (g.cut.kind === "fail") {
+      drawFailFx(p, t);
+      if (t > 0.12) wobbleText(p, "ITCHY!", W / 2, 44, t, 2.2, C.warm);
+      text(p, "TOO ITCHY TO SLEEP", W / 2, 60, C.textDim, { align: "center" });
+    } else {
+      drawClearFx(p, frame, t);
+      const all = g.cut.kind === "clear" && g.cut.allClear;
+      const msg = all ? "ALL CLEAR!" : g.cut.kind === "clear" ? "NIGHT CLEAR!" : "DAWN!";
+      if (t > 0.1) wobbleText(p, msg, W / 2, 44, t * 0.5, 1.4, C.warm);
+      if (all) text(p, "3 NIGHTS, NO BITES", W / 2, 60, C.textDim, { align: "center" });
+      else if (g.stageIndex < STAGES.length - 1) text(p, "NEXT - " + STAGE_NAMES[g.stageIndex + 1], W / 2, 60, C.textDim, { align: "center" });
     }
   }
 
@@ -511,8 +630,9 @@ export function createGame({ seed = 3 } = {}) {
     text(p, "SWAT " + g.totalKills + "   MISS " + g.misses, W / 2, y0 + 50, C.textDim, { align: "center" });
     text(p, "BITE " + g.bites + "   BEST x" + Math.max(1, g.bestCombo), W / 2, y0 + 60, C.textDim, { align: "center" });
     text(p, g.endReason === "eaten" ? "REACHED " + (g.stageIndex + 1) + "/" + STAGES.length : "ALL " + STAGES.length + " NIGHTS", W / 2, y0 + 72, C.textDim, { align: "center" });
-    const a = 0.5 + Math.sin(g.t * 4) * 0.5;
-    text(p, "TAP TO RETRY", W / 2, y0 + 90, C.text, { align: "center", alpha: 0.45 + a * 0.55 });
+    // 半透明の点滅はディザで文字が崩れるので、色を切り替えて点滅させる
+    const on = Math.sin(g.t * 4) > -0.2;
+    text(p, "TAP TO RETRY", W / 2, y0 + 90, on ? C.text : C.textDim, { align: "center" });
   }
 
   return {
