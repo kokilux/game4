@@ -5,7 +5,7 @@ import { createFrame, painterFor, mix } from "../../vendor/pixelfx/src/core/inde
 import { C, W, H } from "./palette.js";
 import { STAGES, STAGE_NAMES, stageWorld, drawSleeperBase, drawSleeperHead, BED } from "./scene.js";
 import { createMosquito, updateMosquito, drawMosquito, hittable, hitRadius, biteEta, airborne } from "./mosquito.js";
-import { createHand, aim, startSlap, updateHand, drawHand, impactPoint, canSlap, IMPACT_AT } from "./hand.js";
+import { createHand, aim, startSlap, updateHand, drawHand, impactPoint, canSlap, IMPACT_AT, SLAP_COOLDOWN } from "./hand.js";
 import { createFxLayer } from "./fx.js";
 import { text, labelWidth, rng, clamp01, lerp } from "./draw.js";
 
@@ -19,7 +19,20 @@ export function createGame({ seed = 3 } = {}) {
     stageIndex: 0,
     stageRound: 0,
     world: null,
-    phase: "ready", // ready | play | interlude | over
+    phase: "title", // title | help | play | interlude | clear | over
+    titleT: 0,
+    menuIndex: 0,
+    helpT: 0,
+    clearT: 0,
+    clearInfo: null,
+    paused: false,
+    pauseIndex: 0,
+    soundOn: true,
+    log: [],            // ステージごとの成績（リザルトで並べる）
+    resultIndex: 0,
+    stageBites: 0,
+    stageCombo: 0,
+    stageBonus: 0,
     hp: HP_MAX,
     kills: 0,           // このステージの捕獲
     totalKills: 0,
@@ -69,6 +82,9 @@ export function createGame({ seed = 3 } = {}) {
     g.spawnIn = 0.8;
     g.night = 0;
     g.combo = 0;
+    g.stageBites = 0;
+    g.stageCombo = 0;
+    g.stageBonus = 0;
     g.hitStop = 0;
     g.flash = 0;
     g.shake = 0;
@@ -81,7 +97,7 @@ export function createGame({ seed = 3 } = {}) {
 
   // ---------------------------------------------------------------- 進行
   function start() {
-    if (g.phase !== "ready") return;
+    if (g.phase !== "ready" && g.phase !== "title" && g.phase !== "over") return;
     g.phase = "play";
     g.night = 0;
     g.t = 0;
@@ -90,7 +106,12 @@ export function createGame({ seed = 3 } = {}) {
   }
 
   function restart() {
-    g.phase = "ready";
+    g.phase = "title";
+    g.paused = false;
+    g.log = [];
+    g.cut = null;
+    g.clearInfo = null;
+    g.menuIndex = 0;
     g.t = 0;
     g.hp = HP_MAX;
     g.totalKills = 0;
@@ -125,6 +146,7 @@ export function createGame({ seed = 3 } = {}) {
     if (clear) g.splats.length = 0; // 夜を越えたら血の跡は拭う
     const timeBonus = Math.max(0, Math.round((w.night - g.night) * 10));
     const bonus = clear ? 500 + timeBonus : 100;
+    g.stageBonus = bonus;
     g.score += bonus;
     g.stageScore += bonus;
     g.banner = clear ? "NIGHT CLEAR" : "DAWN";
@@ -133,6 +155,7 @@ export function createGame({ seed = 3 } = {}) {
     g.cut = { kind: clear ? "clear" : "dawn", t: 0, allClear: false };
 
     if (g.stageIndex >= STAGES.length - 1) {
+      scoreStage(); // 最後の夜もリザルトの表に載せる
       g.phase = "over";
       g.cut = { kind: clear ? "clear" : "dawn", t: 0, allClear: clear };
       g.banner = clear ? "ALL CLEAR" : "DAWN";
@@ -142,6 +165,41 @@ export function createGame({ seed = 3 } = {}) {
     if (clear) g.hp = Math.min(HP_MAX, g.hp + 1); // クリアで体力が1回復
     g.phase = "interlude";
     g.interludeT = 0;
+  }
+
+  /** 演出が終わったら、次の夜の前に独立した「クリア画面」を挟む。 */
+  function scoreStage() {
+    g.log.push({
+      name: g.world.name,
+      jp: g.world.jp,
+      kills: g.kills,
+      bugs: g.world.bugs,
+      bites: g.bitesInStage ?? 0,
+      score: g.stageScore,
+      combo: g.stageCombo ?? g.bestCombo,
+      clear: g.endReason === "clear",
+    });
+  }
+
+  function finishStage() {
+    scoreStage();
+    g.clearInfo = {
+      clear: g.endReason === "clear",
+      name: g.world.name,
+      jp: g.world.jp,
+      index: g.stageIndex,
+      next: g.stageIndex < STAGES.length - 1 ? STAGE_NAMES[g.stageIndex + 1] : null,
+      kills: g.kills,
+      bugs: g.world.bugs,
+      bites: g.stageBites ?? 0,
+      combo: g.stageCombo ?? g.bestCombo,
+      bonus: g.stageBonus ?? 0,
+      score: g.stageScore,
+      total: g.score,
+    };
+    g.phase = "clear";
+    g.clearT = 0;
+    g.events.push({ type: "clearScreen" });
   }
 
   function nextStage() {
@@ -156,6 +214,63 @@ export function createGame({ seed = 3 } = {}) {
   function restHand() {
     g.hand.tx = 262;
     g.hand.ty = 206;
+  }
+
+  // ---------------------------------------------------------------- メニュー
+  const TITLE_MENU = 3; // START / HOW TO PLAY / SOUND
+  const RESULT_MENU = 2; // RETRY / TITLE
+  const PAUSE_MENU = 3; // RESUME / RESTART / TITLE
+
+  function menuCount() {
+    if (g.phase === "title") return TITLE_MENU;
+    if (g.phase === "over") return RESULT_MENU;
+    if (g.paused) return PAUSE_MENU;
+    return 0;
+  }
+
+  function menuMove(d) {
+    const n = menuCount();
+    if (!n) return;
+    const key = g.phase === "over" ? "resultIndex" : g.paused ? "pauseIndex" : "menuIndex";
+    g.resultIndex = g.resultIndex ?? 0;
+    g[key] = ((g[key] ?? 0) + d + n) % n;
+    g.events.push({ type: "menu", dir: d });
+  }
+
+  /** 決定。どの画面でも「スペース／クリック」で呼べる。返り値は消費したか。 */
+  function confirm() {
+    if (g.paused) {
+      if (g.pauseIndex === 0) g.paused = false;
+      else if (g.pauseIndex === 1) { restart(); start(); }
+      else restart();
+      return true;
+    }
+    if (g.phase === "title") {
+      if (g.menuIndex === 0) { start(); return true; }
+      if (g.menuIndex === 1) { g.phase = "help"; g.helpT = 0; return true; }
+      g.soundOn = !g.soundOn;
+      g.events.push({ type: "sound", on: g.soundOn });
+      return true;
+    }
+    if (g.phase === "help") { g.phase = "title"; return true; }
+    if (g.phase === "clear") {
+      if (g.clearT > 0.5) nextStage();
+      return true;
+    }
+    if (g.phase === "over") {
+      if (g.resultIndex === 0) { restart(); start(); }
+      else restart();
+      return true;
+    }
+    return false;
+  }
+
+  function togglePause() {
+    if (g.phase !== "play") return false;
+    g.paused = !g.paused;
+    g.pauseIndex = 0;
+    g.events.push({ type: "pause", paused: g.paused });
+    return true;
   }
 
   function pointer(x, y) {
@@ -195,6 +310,7 @@ export function createGame({ seed = 3 } = {}) {
     g.totalKills++;
     g.combo++;
     g.bestCombo = Math.max(g.bestCombo, g.combo);
+    g.stageCombo = Math.max(g.stageCombo, g.combo);
     const base = air ? 130 : 100;
     const gain = base + (fast ? 50 : 0) + Math.min(5, g.combo - 1) * 10;
     g.score += gain;
@@ -321,7 +437,23 @@ export function createGame({ seed = 3 } = {}) {
     }
     g.splats = g.splats.filter((s) => s.t < 14);
 
+    if (g.paused) return;
+
+    if (g.phase === "title" || g.phase === "help") {
+      g.titleT += dt;
+      if (g.phase === "help") g.helpT += dt;
+      updateHand(g.hand, dt);
+      g.fx.update(dt);
+      return;
+    }
     if (g.phase === "ready") { updateHand(g.hand, dt); g.fx.update(dt); return; }
+
+    if (g.phase === "clear") {
+      g.clearT += dt;
+      // 何も押さなくても 9 秒で次の夜へ（待たせすぎない）
+      if (g.clearT > 9) nextStage();
+      return;
+    }
 
     if (g.phase === "interlude") {
       g.interludeT += dt;
@@ -329,7 +461,7 @@ export function createGame({ seed = 3 } = {}) {
       restHand();
       updateHand(g.hand, dt);
       g.fx.update(dt);
-      if (g.interludeT > 2.0) nextStage();
+      if (g.interludeT > 2.0) finishStage();
       return;
     }
     if (g.phase === "over") {
@@ -356,6 +488,7 @@ export function createGame({ seed = 3 } = {}) {
       if (ev === "bite") {
         g.hp--;
         g.bites++;
+        g.stageBites++;
         g.combo = 0;
         g.shake = 0.4;
         g.flash = FLASH * 0.6;
@@ -388,6 +521,13 @@ export function createGame({ seed = 3 } = {}) {
   // ---------------------------------------------------------------- 描画
   function draw(frame) {
     const w = g.world;
+    pRef = null;
+    if (g.phase === "title") { const p0 = painterFor(frame); drawTitle(p0, frame); return; }
+    if (g.phase === "help") {
+      const p0 = painterFor(frame);
+      drawHelp(p0, frame);
+      return;
+    }
     frame.color.set(w.frame.color);
     frame.light.fill(0);
     const p = painterFor(frame);
@@ -434,8 +574,10 @@ export function createGame({ seed = 3 } = {}) {
       });
     }
 
-    drawHud(p, g);
-    if (g.showPrinciples) drawPrinciple(p, g);
+    if (g.phase === "play" || g.phase === "interlude") {
+      drawHud(p, g);
+      if (g.showPrinciples) drawPrinciple(p, g);
+    }
 
     if (g.phase === "play" && !g.hintDone && g.hintT > 0) {
       const a = Math.min(1, g.hintT / 1.5);
@@ -455,8 +597,17 @@ export function createGame({ seed = 3 } = {}) {
       if (ct < CUT_HOLD) drawCutscene(p, frame);
       else {
         blendRect(frame, 0, 0, W, H, C.void, 0.62);
+        pRef = p;
         drawResult(p, g);
       }
+    }
+    if (g.phase === "clear") {
+      pRef = p;
+      drawClearScreen(p, frame);
+    }
+    if (g.paused) {
+      pRef = p;
+      drawPause(p, frame);
     }
   }
 
@@ -472,29 +623,246 @@ export function createGame({ seed = 3 } = {}) {
       }
   }
 
+
+  // ---------------------------------------------------------------- 画面（タイトル/ヘルプ/クリア/ポーズ）
+  /** 右向きの三角（メニューのカーソル）。 */
+  function caret(p, x, y, c) {
+    for (let i = 0; i < 3; i++) p.rect(x + i, y + i, 1, 5 - i * 2, c);
+  }
+
+  function panel(frame, x, y, w, h, k = 0.72) {
+    blendRect(frame, x - 2, y - 2, x + w + 2, y + h + 2, C.void, k);
+    p_rectBorder(x, y, w, h);
+  }
+  let pRef = null;
+  function p_rectBorder(x, y, w, h) {
+    const p = pRef;
+    p.rect(x, y, w, 1, C.frameHi);
+    p.rect(x, y + h - 1, w, 1, C.frame);
+    p.rect(x, y, 1, h, C.frameHi);
+    p.rect(x + w - 1, y, 1, h, C.frame);
+    p.put(x, y, C.warm); p.put(x + w - 1, y, C.warm);
+  }
+
+  /** 選択行（下地の帯）。scale=2 でタイトル/ポーズの大きいメニュー。 */
+  function menuRow(p, x, y, w, label, on, t, scale = 2) {
+    const hh = scale === 2 ? 15 : 11;
+    if (on) {
+      p.rect(x + 5, y - 4, w - 10, hh, C.void, 0.55);
+      p.rect(x + 5, y - 4, w - 10, 1, C.warm, 0.85);
+      p.rect(x + 5, y - 4 + hh - 1, w - 10, 1, C.frame, 0.7);
+      const glow = 0.55 + Math.sin(t * 5) * 0.25;
+      caret(p, x + 10, y, C.warm);
+    }
+    text(p, label, x + w / 2 + (on ? 2 : 0), y, on ? C.text : C.textDim, { font: "mini", scale, align: "center" });
+  }
+
+  /** タイトル/ヘルプの下地（静かに息をする寝姿）。 */
+  function drawBackdrop(p, frame, dark = 0.5) {
+    const w = g.world;
+    frame.color.set(w.frame.color);
+    frame.light.fill(0);
+    pRef = p;
+    p.reset();
+    w.drawAmbient(p, g.t);
+    drawSleeperBase(p, g.t, w.pal);
+    w.drawOver(p, g.t);
+    drawSleeperHead(p, g.t, 0, w.pal, "sleep", 0);
+    blendRect(frame, 0, 0, W, H, C.void, dark);
+    blendRect(frame, 0, 52, W, H, C.void, dark * 0.8);
+  }
+
+  function drawTitle(p, frame) {
+    drawBackdrop(p, frame);
+
+    const bob = Math.round(Math.sin(g.t * 1.2) * 1);
+    // ロゴ
+    text(p, "KA", W / 2 + 2, 6 + bob + 2, C.void, { font: "big", scale: 4, align: "center" });
+    text(p, "KA", W / 2, 6 + bob, C.text, { font: "big", scale: 4, align: "center" });
+    text(p, "MOSQUITO NIGHT", W / 2, 38, C.warm, { font: "mini", scale: 2, align: "center" });
+    p.rect(W / 2 - 52, 50, 104, 1, C.frameHi);
+    p.rect(W / 2 - 52, 50, 14, 1, C.warm);
+    p.rect(W / 2 + 38, 50, 14, 1, C.warm);
+
+    // メニュー
+    const items = ["START", "HOW TO PLAY", g.soundOn ? "SOUND ON" : "SOUND OFF"];
+    const bw = 112, bx = Math.round((W - bw) / 2);
+    for (let i = 0; i < items.length; i++) {
+      menuRow(p, bx, 61 + i * 18, bw, items[i], g.menuIndex === i, g.t);
+    }
+    // 操作
+    const blink = Math.sin(g.t * 3) > -0.4;
+    text(p, "UP/DOWN SELECT    SPACE OK", W / 2, 124, C.textDim, { align: "center", alpha: blink ? 1 : 0.6 });
+    text(p, "3 NIGHTS   TATAMI / WESTERN / SUMMER", W / 2, H - 14, C.textDim, { align: "center", alpha: 0.8 });
+  }
+
+  function drawHelp(p, frame) {
+    drawBackdrop(p, frame, 0.72);
+    blendRect(frame, 0, 0, W, H, C.void, 0.55);
+    pRef = p;
+    const x = 30, y = 16, w = W - 60, h = H - 40;
+    panel(frame, x, y, w, h, 0.5);
+    text(p, "HOW TO PLAY", W / 2, y + 10, C.warm, { font: "big", align: "center", scale: 1 });
+    p.rect(x + 12, y + 24, w - 24, 1, C.frameHi);
+    const lines = [
+      "A MOSQUITO COMES IN ON THE BUZZ.",
+      "IT HOVERS, THEN STOPS TO BITE.",
+      "SLAP IT WHILE IT RESTS ON YOU.",
+      "A MISS SCARES IT AWAY.",
+      "3 BITES AND THE NIGHT ENDS.",
+      "SWAT EVERY BUG TO SLEEP ON.",
+    ];
+    for (let i = 0; i < lines.length; i++) {
+      text(p, lines[i], x + 10, y + 34 + i * 11, i > 2 && i < 4 ? C.text : C.textDim);
+    }
+    p.rect(x + 12, y + 100, w - 24, 1, C.frameHi);
+    text(p, "SPACE SLAP   P PRINCIPLES   M SOUND", x + 10, y + 106, C.textDim);
+    text(p, "ESC PAUSE   R TITLE", x + 10, y + 116, C.textDim);
+    const blink = Math.sin(g.t * 3) > -0.3;
+    text(p, "SPACE / CLICK   BACK", W / 2, H - 16, blink ? C.text : C.textDim, { align: "center" });
+  }
+
+  function drawClearScreen(p, frame) {
+    const info = g.clearInfo;
+    blendRect(frame, 0, 0, W, H, C.void, 0.78);
+    pRef = p;
+    const x = 34, y = 22, w = W - 68, h = H - 44;
+    panel(frame, x, y, w, h, 0.55);
+    const inK = clamp01(g.clearT / 0.35);
+    const title = info.clear ? "NIGHT CLEAR" : "DAWN BREAKS";
+    if (g.clearT > 0.12) wobbleText(p, title, W / 2, y + 12, g.clearT * 0.7, 1.2 * inK, info.clear ? C.warm : C.text);
+    text(p, "NIGHT " + (info.index + 1) + " / " + STAGES.length + "   " + info.name, W / 2, y + 30, C.textDim, { align: "center" });
+    p.rect(x + 14, y + 39, w - 28, 1, C.frameHi);
+
+    const rows = [
+      ["SWAT", info.kills + " / " + info.bugs, C.text],
+      ["BITE", String(info.bites), info.bites > 0 ? C.zit : C.text],
+      ["BEST COMBO", "x" + Math.max(1, info.combo), C.text],
+      ["NIGHT BONUS", "+" + info.bonus, C.warm],
+      ["TOTAL SCORE", String(info.total), C.text],
+    ];
+    const vis = Math.min(rows.length, Math.floor(g.clearT / 0.16) + 1);
+    for (let i = 0; i < vis; i++) {
+      const ry = y + 48 + i * 11;
+      text(p, rows[i][0], x + 16, ry, C.textDim);
+      text(p, rows[i][1], x + w - 16, ry, rows[i][2], { align: "right" });
+    }
+    p.rect(x + 14, y + 104, w - 28, 1, C.frameHi);
+    if (info.next) {
+      text(p, "NEXT  " + info.next, W / 2, y + 110, C.text, { align: "center" });
+    } else {
+      text(p, "ALL " + STAGES.length + " NIGHTS DONE", W / 2, y + 110, C.warm, { align: "center" });
+    }
+    if (g.clearT > 0.5) {
+      const blink = Math.sin(g.t * 4) > -0.3;
+      text(p, "SPACE / TAP   NEXT NIGHT", W / 2, y + h - 12, blink ? C.text : C.textDim, { align: "center" });
+    }
+  }
+
+  function drawPause(p, frame) {
+    blendRect(frame, 0, 0, W, H, C.void, 0.72);
+    pRef = p;
+    const w = 118, x = Math.round((W - w) / 2), y = 24, h = 110;
+    panel(frame, x, y, w, h, 0.55);
+    text(p, "PAUSED", W / 2, y + 10, C.warm, { font: "big", align: "center" });
+    p.rect(x + 12, y + 24, w - 24, 1, C.frameHi);
+    const items = ["RESUME", "RESTART", "TITLE"];
+    for (let i = 0; i < items.length; i++) menuRow(p, x + 12, y + 38 + i * 20, w - 24, items[i], g.pauseIndex === i, g.t);
+  }
+
+  /** 画面右下の「羽音スコープ」：蚊の方向と距離が一目で分かる。 */
+  function drawScope(p, g) {
+    const bw = 42, bh = 28, x0 = W - bw - 3, y0 = H - bh - 3;
+    p.rect(x0, y0, bw, bh, C.void, 0.5);
+    p.rect(x0, y0, bw, 1, C.frameHi, 0.55);
+    p.rect(x0, y0 + bh - 1, bw, 1, C.frame, 0.7);
+    p.rect(x0, y0, 1, bh, C.frameHi, 0.4);
+    p.rect(x0 + bw - 1, y0, 1, bh, C.frameHi, 0.4);
+    // 世界座標 → 枠内（部屋の平面をそのまま縮小）
+    const mx = (wx) => x0 + 2 + clamp01((wx - 8) / 304) * (bw - 5);
+    const my = (wy) => y0 + 2 + clamp01((wy - 88) / 88) * (bh - 5);
+    // 自分（寝ている人）: 枕と体のライン
+    for (let i = 0; i < 3; i++) p.put(mx(BED.head.cx + i * 60), my(BED.head.cy + 8), C.frameHi, 0.7);
+    p.rect(Math.round(mx(BED.head.cx)) - 1, Math.round(my(BED.head.cy)) - 1, 3, 3, C.pillowHi, 0.75);
+    const earX = BED.head.cx - 4, earY = BED.head.cy - 2;
+    for (const b of g.bugs) {
+      const d = Math.hypot(b.x - earX, b.y - earY);
+      const near = 1 - Math.min(1, d / 240);
+      const landed = b.state === "land";
+      const c = landed ? C.zit : near > 0.62 ? C.warm : C.textDim;
+      const bx = Math.round(mx(b.x)), by = Math.round(my(b.y));
+      p.put(bx, by, c);
+      p.put(bx + 1, by, c, 0.6);
+      if (near > 0.5) {
+        const a = 0.25 + Math.sin(g.t * (landed ? 16 : 8)) * 0.2;
+        p.ring(bx, by, 3.5, 1, c, Math.max(0, a));
+      }
+    }
+  }
+
   function drawHud(p, g) {
     const w = g.world;
     const left = 1 - clamp01(g.night / w.night);
+    // 夜の残り（上端のバー）
     p.rect(0, 0, W, 1, C.void);
     p.rect(0, 0, Math.round(W * left), 1, left < 0.25 ? C.zit : C.pillowHi);
+    p.rect(0, 1, W, 1, C.void, 0.35);
 
+    // 体力（ハート）
     for (let i = 0; i < HP_MAX; i++) {
-      const x = 6 + i * 10, y = 6, alive = i < g.hp, c = alive ? C.zit : C.wallHi;
+      const x = 6 + i * 10, y = 5, alive = i < g.hp, c = alive ? C.zit : C.wallHi;
       p.px(x + 1, y, c); p.px(x + 2, y + 1, c); p.px(x + 3, y, c);
       p.px(x, y + 1, c); p.px(x + 4, y + 1, c);
       p.rect(x, y + 2, 5, 1, c);
       p.rect(x + 1, y + 3, 3, 1, c);
       p.px(x + 2, y + 4, c);
     }
+    if (g.hp === 1) {
+      const a = 0.55 + Math.sin(g.t * 7) * 0.45;
+      text(p, "1 BITE LEFT", 6, 14, C.zit, { alpha: Math.max(0.25, a) });
+    }
 
-    text(p, w.label + "  " + w.name, W - 6, 5, C.textDim, { align: "right" });
-    text(p, "SWAT " + g.kills + "/" + w.bugs, W - 6, 13, C.text, { align: "right" });
-    if (g.combo > 1) text(p, "x" + g.combo, 6, 16, C.warm);
+    // 右上：部屋名と、捕獲の進み（四角いピップ）
+    text(p, "NIGHT " + (g.stageIndex + 1) + "  " + w.name, W - 6, 5, C.textDim, { align: "right" });
+    const total = w.bugs, pw = 5, gap = 2;
+    const px0 = W - 6 - (total * pw + (total - 1) * gap);
+    for (let i = 0; i < total; i++) {
+      const x = px0 + i * (pw + gap);
+      if (i < g.kills) p.rect(x, 14, pw, 4, C.pillowHi);
+      else p.rect(x, 14, pw, 4, C.frame, 0.7);
+    }
 
+    // コンボ（続いているうちは数字が伸びる）
+    if (g.combo > 1) {
+      const k = clamp01(g.combo / 5);
+      text(p, "COMBO", 6, 24, C.textDim);
+      text(p, "x" + g.combo, 6, 30, k >= 1 ? C.warm : C.text, { font: "big" });
+      for (let i = 0; i < Math.min(5, g.combo); i++) p.rect(6 + i * 5, 40, 3, 2, i < 5 ? C.warm : C.frame);
+    }
+
+    // 平手のクールダウン（打てない間は手の下に細いバー）
+    if (!canSlap(g.hand) && g.phase === "play") {
+      const k = clamp01(g.hand.cooldown / SLAP_COOLDOWN);
+      const bx = Math.round(g.hand.x) - 11, by = Math.round(g.hand.y) + 17;
+      p.rect(bx, by, 22, 2, C.void, 0.65);
+      p.rect(bx, by, Math.round(22 * (1 - k)), 2, C.frameHi);
+    }
+
+    // 蚊の状態：着地中は刺されるまでの残り、ホバー中は「いま叩ける」窓
     for (const b of g.bugs) {
+      if (b.state === "hover") {
+        const win = 0.32 / (b.speed || 1);
+        const k = clamp01(b.t / win);
+        const r = 13 - k * 7;
+        p.ring(b.x, b.y, r, 1, C.warm, 0.75 - k * 0.35);
+        if (k > 0.55) {
+          const a = 0.6 + Math.sin(g.t * 40) * 0.4;
+          text(p, "NOW", b.x, b.y - r - 7, C.warm, { align: "center", alpha: a });
+        }
+      }
       if (b.state === "land" && b.spot?.kind === "skin") {
-        const total = 1.45;
-        const grow = clamp01(1 - b.landTimer / total);
+        const total = (b.spot.kind === "skin" ? 1.45 : 1.6) * (g.world.grace ?? 1) / (b.speed || 1);
+        const grow = clamp01(1 - b.landTimer / Math.max(0.2, total));
         const a = 0.45 + Math.sin(g.t * 10) * 0.35;
         p.px(b.x + 1, b.y + 2, C.zit);
         p.px(b.x + 2, b.y + 2, C.zit);
@@ -508,6 +876,7 @@ export function createGame({ seed = 3 } = {}) {
         text(p, "!", b.x, b.y - 12, C.zit, { align: "center", scale: 2 });
       }
     }
+    drawScope(p, g);
   }
 
   function drawPrinciple(p, g) {
@@ -617,22 +986,64 @@ export function createGame({ seed = 3 } = {}) {
     }
   }
 
-  function drawResult(p, g) {
-    const x0 = 46, y0 = 34, w = W - 92, h = 112;
-    p.rect(x0, y0, w, h, C.void);
-    p.rect(x0 + 1, y0 + 1, w - 2, h - 2, C.wallTop);
-    p.rect(x0, y0, w, 1, C.pillowHi); p.rect(x0, y0 + h - 1, w, 1, C.pillowHi);
-    p.rect(x0, y0, 1, h, C.pillowHi); p.rect(x0 + w - 1, y0, 1, h, C.pillowHi);
+  function rankFor() {
+    const cleared = g.log.filter((r) => r.clear).length;
+    const all = cleared >= STAGES.length;
+    const score = g.finalScore || g.score;
+    if (all && g.bites <= 2) return "S";
+    if (all) return "A";
+    if (score >= 3200) return "B";
+    if (score >= 1800) return "C";
+    return "D";
+  }
 
-    text(p, g.banner ?? "", W / 2, y0 + 12, C.warm, { font: "big", align: "center" });
-    p.rect(x0 + 18, y0 + 24, w - 36, 1, C.frame);
-    text(p, "SCORE " + (g.finalScore || g.score), W / 2, y0 + 34, C.text, { align: "center" });
-    text(p, "SWAT " + g.totalKills + "   MISS " + g.misses, W / 2, y0 + 50, C.textDim, { align: "center" });
-    text(p, "BITE " + g.bites + "   BEST x" + Math.max(1, g.bestCombo), W / 2, y0 + 60, C.textDim, { align: "center" });
-    text(p, g.endReason === "eaten" ? "REACHED " + (g.stageIndex + 1) + "/" + STAGES.length : "ALL " + STAGES.length + " NIGHTS", W / 2, y0 + 72, C.textDim, { align: "center" });
-    // 半透明の点滅はディザで文字が崩れるので、色を切り替えて点滅させる
-    const on = Math.sin(g.t * 4) > -0.2;
-    text(p, "TAP TO RETRY", W / 2, y0 + 90, on ? C.text : C.textDim, { align: "center" });
+  /** リザルト。ステージごとの成績を並べ、RETRY / TITLE を選べる。 */
+  function drawResult(p, g) {
+    const x0 = 28, y0 = 12, w = W - 56, h = H - 26;
+    p.rect(x0, y0, w, h, C.void);
+    p.rect(x0 + 1, y0 + 1, w - 2, h - 2, C.wall);
+    p.rect(x0, y0, w, 1, C.pillowHi); p.rect(x0, y0 + h - 1, w, 1, C.frameHi);
+    p.rect(x0, y0, 1, h, C.pillowHi); p.rect(x0 + w - 1, y0, 1, h, C.frameHi);
+    // 四隅の飾り
+    for (const [cx, cy] of [[x0 + 2, y0 + 2], [x0 + w - 3, y0 + 2], [x0 + 2, y0 + h - 3], [x0 + w - 3, y0 + h - 3]]) p.put(cx, cy, C.warm);
+
+    const all = g.endReason === "dawn" || g.log.length >= STAGES.length;
+    const title = (g.banner === "ALL CLEAR" ? "ALL CLEAR" : g.endReason === "eaten" ? "NO SLEEP" : g.banner) ?? "NO SLEEP";
+    text(p, title, W / 2, y0 + 9, C.warm, { font: "big", align: "center" });
+    p.rect(x0 + 10, y0 + 20, w - 20, 1, C.frameHi);
+
+    text(p, "SCORE", x0 + 12, y0 + 26, C.textDim);
+    text(p, String(g.finalScore || g.score), x0 + w - 12, y0 + 26, C.text, { align: "right" });
+    p.rect(x0 + 10, y0 + 35, w - 20, 1, C.frame);
+
+    // ステージごとの行
+    for (let i = 0; i < STAGES.length; i++) {
+      const r = g.log[i];
+      const ry = y0 + 41 + i * 10;
+      const dim = r ? C.text : C.frame;
+      text(p, String(i + 1), x0 + 12, ry, r ? C.textDim : C.frame);
+      text(p, STAGE_NAMES[i] ?? "", x0 + 22, ry, dim);
+      if (r) {
+        text(p, r.kills + "/" + r.bugs, x0 + w - 52, ry, r.clear ? C.text : C.textDim, { align: "right" });
+        text(p, r.bites + " BITE", x0 + w - 12, ry, r.bites > 0 ? C.zit : C.textDim, { align: "right" });
+      } else {
+        text(p, "-", x0 + w - 12, ry, C.frame, { align: "right" });
+      }
+    }
+    p.rect(x0 + 10, y0 + 74, w - 20, 1, C.frame);
+
+    text(p, "BEST COMBO x" + Math.max(1, g.bestCombo), x0 + 12, y0 + 80, C.textDim);
+    text(p, "MISS " + g.misses, x0 + w - 12, y0 + 80, C.textDim, { align: "right" });
+    // ランク
+    const rank = rankFor();
+    text(p, "RANK", x0 + 12, y0 + 90, C.textDim);
+    text(p, rank, x0 + w - 12, y0 + 88, rank === "S" ? C.warm : C.text, { font: "big", align: "right" });
+    p.rect(x0 + 10, y0 + 100, w - 20, 1, C.frameHi);
+
+    // メニュー
+    const mw = 92, mx = Math.round((W - mw) / 2);
+    const items = ["RETRY", "TITLE"];
+    for (let i = 0; i < items.length; i++) menuRow(p, mx, y0 + 106 + i * 15, mw, items[i], g.resultIndex === i, g.t, 1);
   }
 
   return {
@@ -643,6 +1054,10 @@ export function createGame({ seed = 3 } = {}) {
     slap,
     start,
     restart,
+    confirm,
+    menuMove,
+    togglePause,
+    nextStage,
     /** テスト/QA 用：いまの蚊とステージの状態 */
     debug() {
       const m = g.bugs[0];

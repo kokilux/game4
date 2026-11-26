@@ -8,71 +8,38 @@
       :root {
         --ink: #e6e2ff;
         --dim: #8b85b0;
-        --bg: #07060c;
+        --bg: #07060c; /* ゲームの闇と同じ色（額縁を消す） */
       }
       * { box-sizing: border-box; }
       html, body {
         margin: 0;
         height: 100%;
-        background: radial-gradient(ellipse at 50% 40%, #14111f 0%, var(--bg) 70%);
+        background: var(--bg);
         color: var(--ink);
         font-family: ui-monospace, "SFMono-Regular", Menlo, "Hiragino Kaku Gothic ProN", Meiryo, monospace;
         overflow: hidden;
         -webkit-user-select: none;
         user-select: none;
         touch-action: none;
+        overscroll-behavior: none;
       }
+      /* ゲーム画面だけ。枠・角丸・影は無し（画面全体＝ゲーム画面） */
       #stage {
-        position: relative;
-        height: 100%;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 14px;
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: var(--bg);
+        cursor: none;
       }
-      #wrap { position: relative; line-height: 0; }
       canvas {
         display: block;
         image-rendering: pixelated;
         image-rendering: crisp-edges;
-        background: #07060c;
-        border-radius: 6px;
-        box-shadow: 0 0 0 1px #241f36, 0 18px 60px rgba(0, 0, 0, 0.7), 0 0 90px rgba(90, 80, 150, 0.12);
+        background: var(--bg);
         cursor: none;
         touch-action: none;
       }
-      #overlay {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 10px;
-        text-align: center;
-        pointer-events: none;
-        background: radial-gradient(ellipse at 50% 50%, rgba(7, 6, 12, 0.55), rgba(7, 6, 12, 0.78));
-        opacity: 0;
-        transition: opacity 0.28s ease;
-        border-radius: 6px;
-      }
-      #overlay[data-phase="ready"], #overlay[data-phase="over"] { opacity: 1; }
-      #overlay-title {
-        font-size: clamp(28px, 6vw, 54px);
-        letter-spacing: 0.32em;
-        margin-left: 0.32em;
-        text-shadow: 0 0 24px rgba(160, 150, 230, 0.55);
-      }
-      #overlay-body { font-size: clamp(11px, 1.6vw, 14px); line-height: 1.9; color: #cfc8ee; }
-      #overlay-hint { font-size: clamp(10px, 1.3vw, 12px); color: var(--dim); letter-spacing: 0.08em; }
-      #info {
-        font-size: 11px;
-        color: var(--dim);
-        letter-spacing: 0.16em;
-        height: 14px;
-      }
-      #notes { font-size: 10px; color: #4f4a68; letter-spacing: 0.1em; }
       #fatal {
         position: fixed;
         left: 12px; right: 12px; bottom: 12px;
@@ -85,21 +52,11 @@
         line-height: 1.6;
         z-index: 9;
       }
-      @media (max-width: 520px) { #notes { display: none; } }
     </style>
   </head>
   <body>
-    <div id="stage">
-      <div id="wrap">
-        <canvas id="screen" width="320" height="180"></canvas>
-        <div id="overlay" data-phase="ready">
-          <div id="overlay-title">KA</div>
-          <div id="overlay-body">夜の蚊取り。<br />羽音をたよりに、刺される前に叩け。</div>
-          <div id="overlay-hint">TAP / SPACE で叩く ・ M で無音</div>
-        </div>
-      </div>
-      <div id="info"></div>
-      <div id="notes">羽音が近いほど高く大きい ・ 蚊は着地の直前に「止まる」 ・ その一瞬が狙い目</div>
+    <div id="stage" data-phase="title">
+      <canvas id="screen" width="320" height="180"></canvas>
     </div>
     <div id="fatal" hidden></div>
     <script>

@@ -124,7 +124,11 @@ console.log("KA ロジック");
   }
   check("夜が明けると play を抜ける", left, g.state.phase);
   run(g, 3);
-  check("夜明け後は次のステージへ進む", g.state.stageIndex === 1 && g.state.phase === "play", `stage=${g.state.stageIndex} ${g.state.phase}`);
+  check("夜明け後はクリア画面が挟まる", g.state.phase === "clear", `stage=${g.state.stageIndex} ${g.state.phase}`);
+  const ci = g.state.clearInfo;
+  check("クリア画面に次の部屋の名前が出る", !!ci && ci.next === "WESTERN", JSON.stringify(ci && { next: ci.next, kills: ci.kills }));
+  g.confirm();
+  check("クリア画面から次のステージへ進む", g.state.stageIndex === 1 && g.state.phase === "play", `stage=${g.state.stageIndex} ${g.state.phase}`);
   g.restart();
   g.start();
   check("再挑戦でリセットされる", g.state.hp === 3 && g.state.kills === 0 && g.state.score === 0, JSON.stringify(g.debug()));

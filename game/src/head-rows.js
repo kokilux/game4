@@ -1,4 +1,5 @@
-// 横向きに寝ている人の頭（36×30）。顔は枕の上でこちらへ向き、目は閉じている。
+// 寝ている人の頭（36x26）。上を向いて（仰向けで天井を向いて）眠っている。
+// 枕に顔を預け、上から見おろした形につぶして描く（目は上寄り、あごは短い）。
 // 記号: # 輪郭 / H 髪 / h 髪のツヤ / k 髪の陰 / S 肌 / s 肌の陰 / d 肌の深い陰
 //       b 眉 / E 閉じた目 / N 鼻の陰 / M 口
 export const HEAD_ROWS = [
@@ -8,20 +9,16 @@ export const HEAD_ROWS = [
   "..............###HHHHHHH###.........",
   "............##HHHHHHHHHHHHH##.......",
   "...........#HHHHHHHHHHhhhhHHH#......",
-  "..........#HHHHHhhhhHHHHHHHHHH#.....",
-  ".........#HHHHHHHHHHHHHHHHHHHHH#....",
   "........#HHHHHHHHHHHHHHHHHHHHHHH#...",
   ".......#HHHHHHHHHHhhHHHHHHHHHHSSS#..",
-  ".......#HHHHSShHHHHHHHHHHHHSSSSSS#..",
-  "......#HHHHHSSSSSHHHHHHHSSSSSSSSSS#.",
   "......#HHHHHSSSSSSSSHSSSSSSSSSSSSS#.",
   "......#HHHHHSSSSSSSSSSSSSSSSSSSSSS#.",
-  "......#HHHHHSSSbbbbSSSSbbbbSSSSSSS#.",
+  "......#HHHHHbbbbbSSSSSSbbbbbSSSSSS#.",
   ".....#HHHHHHSSSSSSSSSSSSSSSSSSSSSSS#",
-  "......#HHHHSSSESSSESSSESSSESssssss#.",
-  "......#HHHHSNNSEEEESSSSEEEESssssss#.",
-  "......#HHHHSSNSSSSSSSSSSSSSSssssss#.",
-  "......#HHHHSSNSSSSSSSSSSSSSSssssss#.",
+  "......#HHHSSESSSESSSSSSESSSEssssss#.",
+  "......#HHHSSEEEEESSSSSSEEEEEssssss#.",
+  "......#HHHSSsSSSSSSSSSSSSSSSssssss#.",
+  "......#HHHHSsSSSSSSSSSSSSSSSssssss#.",
   ".......#HHHSSsssSSSNSSSSSSSSsssss#..",
   ".......#HHHSSsssSSSSNSSSSSSSsssss#..",
   "........#HHHHHssSMSSSSMSSSSSssss#...",
@@ -34,7 +31,5 @@ export const HEAD_ROWS = [
   "....................................",
 ];
 
-// 顔の中心（スプライト内の座標）。
-export const HEAD_ANCHOR = { x: 20, y: 17 };
-// 耳の位置（蚊が狙う）. 
-export const HEAD_EAR = { x: 13, y: 18 };
+export const HEAD_ANCHOR = { x: 20, y: 15 };
+export const HEAD_EAR = { x: 13, y: 17 };

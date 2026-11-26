@@ -1,9 +1,12 @@
-// ブラウザ側の入口。320x180 のフレームを整数倍で拡大し、入力・音・ループをつなぐ。
+// ブラウザ側の入口。320x180 のフレームを画面いっぱいに拡大し、入力・音・ループをつなぐ。
+// UI（タイトル・メニュー・クリア画面・リザルト・ポーズ）は全部キャンバスの中に描く。
+// HTML は「黒い額縁」だけ。日本語の説明は README 側に置く。
 
 import { composite, createFrame } from "../../vendor/pixelfx/src/core/index.js";
 import { createGame } from "./game.js";
 import { createAudio } from "./audio.js";
 import { W, H, NIGHT } from "./palette.js";
+import { BED } from "./scene.js";
 
 // 起動マーカー（index.html の番犬が見ている）
 window.__KA_BOOTED = true;
@@ -14,11 +17,7 @@ canvas.width = W;
 canvas.height = H;
 ctx.imageSmoothingEnabled = false;
 
-const overlay = document.getElementById("overlay");
-const overlayTitle = document.getElementById("overlay-title");
-const overlayBody = document.getElementById("overlay-body");
-const overlayHint = document.getElementById("overlay-hint");
-const hudInfo = document.getElementById("info");
+const stageEl = document.getElementById("stage");
 
 const game = createGame({ seed: (Date.now() % 9999) + 1 });
 const audio = createAudio();
@@ -50,6 +49,7 @@ window.addEventListener("pointermove", (e) => {
   game.pointer(x, y);
 });
 
+/** 画面のどこを押しても反応する（キャンバスの外でも開始・平手できる）。 */
 function action(e) {
   if (e && e.cancelable) e.preventDefault();
   unlock();
@@ -62,39 +62,46 @@ function action(e) {
       game.pointer(x, y);
     }
   }
-  if (g.phase === "ready") {
-    game.start();
-    audio.start();
-    overlay.dataset.phase = "play";
-    return;
+  // メニュー系の画面は「決定」だけ
+  if (g.phase === "title" || g.phase === "help" || g.phase === "clear" || g.phase === "over" || g.paused) {
+    if (game.confirm()) return;
   }
-  if (g.phase === "over") {
-    game.restart();
-    game.start();
-    audio.start();
-    overlay.dataset.phase = "play";
-    return;
-  }
-  game.slap();
+  if (g.phase === "play") game.slap();
 }
 
-// 画面のどこを叩いても反応する（キャンバスの外でも開始・平手できる）
 window.addEventListener("pointerdown", action);
+
 window.addEventListener("keydown", (e) => {
-  if (e.code === "Space" || e.code === "KeyZ" || e.code === "Enter") {
+  const g = game.state;
+  if (e.code === "ArrowUp" || e.code === "KeyW") { game.menuMove(-1); return; }
+  if (e.code === "ArrowDown" || e.code === "KeyS") { game.menuMove(1); return; }
+  if (e.code === "Space" || e.code === "KeyZ" || e.code === "Enter" || e.code === "NumpadEnter") {
     if (e.repeat) return;
     action(e);
+    return;
+  }
+  if (e.code === "Escape" || e.code === "KeyP") {
+    if (e.code === "KeyP" && (g.phase === "play" || g.paused)) {
+      game.togglePause();
+      return;
+    }
+    if (g.phase === "help") { game.confirm(); return; }
+    if (g.phase === "play" || g.paused) game.togglePause();
+    return;
   }
   if (e.code === "KeyR") {
+    if (g.phase === "title") return;
     game.restart();
-    overlay.dataset.phase = "ready";
-  }
-  if (e.code === "KeyP") {
-    game.state.showPrinciples = !game.state.showPrinciples;
+    stageEl.dataset.phase = g.phase;
+    return;
   }
   if (e.code === "KeyM") {
-    audio.setMuted(!audio.muted);
-    hudInfo.textContent = audio.muted ? "SOUND OFF" : "";
+    g.soundOn = !g.soundOn;
+    return;
+  }
+  if (e.code === "KeyC") {
+    g.showPrinciples = !g.showPrinciples;
+    return;
   }
 });
 
@@ -110,21 +117,24 @@ function drainEvents() {
     else if (e.type === "bite") audio.bite();
     else if (e.type === "land") audio.land();
     else if (e.type === "end") audio.end(e.reason === "clear" || e.reason === "dawn");
+    else if (e.type === "menu") audio.swing();
+    else if (e.type === "clearScreen") audio.end(true);
   }
 }
 
-// ---- 羽音
+// ---- 羽音（耳の位置は寝具の定義から取る）
 function updateBuzz() {
   const g = game.state;
   const b = g.buzz;
-  if (!b || g.phase !== "play") {
+  if (!b || g.phase !== "play" || g.paused) {
     audio.buzz(0, 300, false);
     return;
   }
-  const earX = 52, earY = 108;
+  const earX = BED.head.cx - 4;
+  const earY = BED.head.cy - 2;
   const d = Math.hypot(b.x - earX, b.y - earY);
   const near = 1 - Math.min(1, d / 300);
-  const hover = b.state === "hover";
+  const hover = b.state === "hover" || b.state === "land";
   const on = b.state !== "land";
   audio.buzz((0.006 + near * 0.055) * (hover ? 1.5 : 1), 300 + near * 240 + (hover ? 60 : 0), on);
 }
@@ -133,6 +143,21 @@ function updateBuzz() {
 let last = performance.now();
 let acc = 0;
 const STEP = 1 / 120;
+
+let lastPhase = "";
+let lastSound = true;
+function syncChrome() {
+  const g = game.state;
+  const ph = g.paused ? "pause" : g.phase;
+  if (ph !== lastPhase) {
+    lastPhase = ph;
+    if (stageEl) stageEl.dataset.phase = ph;
+  }
+  if (g.soundOn !== lastSound) {
+    lastSound = g.soundOn;
+    audio.setMuted(!g.soundOn);
+  }
+}
 
 function loop(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
@@ -151,53 +176,23 @@ function loop(now) {
   composite(frame, img.data, null, 1);
   ctx.putImageData(img, 0, 0);
 
-  syncOverlay();
-  updateStatus();
+  syncChrome();
   requestAnimationFrame(loop);
 }
 
-let lastStatus = 0;
-function updateStatus() {
-  const g = game.state;
-  const t = Math.floor(g.t);
-  if (t === lastStatus) return;
-  lastStatus = t;
-  const bits = [];
-  if (g.phase === "ready") bits.push("TAP TO START");
-  else if (g.phase === "play") bits.push(`NIGHT ${Math.max(0, Math.ceil(NIGHT - g.night))}s`);
-  else bits.push(g.banner ?? "");
-  bits.push(`CATCH ${g.kills}/7`);
-  if (audio.muted) bits.push("SOUND OFF");
-  hudInfo.textContent = bits.join(" ・ ");
-}
-
-let lastPhase = "";
-function syncOverlay() {
-  const g = game.state;
-  if (g.phase === lastPhase) return;
-  lastPhase = g.phase;
-  if (g.phase === "ready") {
-    overlay.dataset.phase = "ready";
-    overlayTitle.textContent = "KA";
-    overlayBody.innerHTML = "夜の蚊取り。<br>羽音をたよりに、刺される前に叩け。";
-    overlayHint.innerHTML = "TAP / SPACE で叩く ・ M で無音";
-  } else if (g.phase === "over") {
-    overlay.dataset.phase = "over";
-    overlayTitle.textContent = g.banner ?? "DAWN";
-    overlayBody.innerHTML = `SCORE ${g.finalScore ?? g.score}<br>CATCH ${g.kills}・BITE ${g.bites}`;
-    overlayHint.innerHTML = "TAP で もう一晩 ・ R でタイトル";
-  } else {
-    overlay.dataset.phase = "play";
-  }
-}
-
-// 画面に合わせて整数倍で拡大
+/**
+ * 画面いっぱいに拡大する。整数倍にこだわらず、縦横どちらかが埋まるまで伸ばす
+ * （`image-rendering: pixelated` なのでドットは潰れない）。
+ * 余った帯は本文と同じ色なので「小さい画面が中にある」ようには見えない。
+ */
 function fit() {
-  const pad = 24;
-  const scale = Math.max(1, Math.floor(Math.min((window.innerWidth - pad) / W, (window.innerHeight - pad * 2) / H)));
-  canvas.style.width = W * scale + "px";
-  canvas.style.height = H * scale + "px";
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const scale = Math.min(vw / W, vh / H);
+  canvas.style.width = Math.floor(W * scale) + "px";
+  canvas.style.height = Math.floor(H * scale) + "px";
 }
 window.addEventListener("resize", fit);
+window.addEventListener("orientationchange", fit);
 fit();
 requestAnimationFrame(loop);

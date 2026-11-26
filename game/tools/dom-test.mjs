@@ -29,11 +29,7 @@ const ctx = {
 
 const elements = {
   screen: el("screen", { width: 320, height: 180, getContext: () => ctx }),
-  overlay: el("overlay"),
-  "overlay-title": el("overlay-title"),
-  "overlay-body": el("overlay-body"),
-  "overlay-hint": el("overlay-hint"),
-  info: el("info"),
+  stage: el("stage"),
 };
 
 globalThis.document = { getElementById: (id) => elements[id] ?? el(id) };
@@ -62,7 +58,7 @@ function tick(ms) {
   frames++;
 }
 
-// タイトル → タップで開始
+// タイトル画面 → タップで START（最初の画面はメニュー）
 const pointerdown = listeners.get("pointerdown") ?? canvasListeners.get("pointerdown");
 if (!pointerdown) throw new Error("pointerdown が登録されていない");
 pointerdown({ preventDefault() {}, clientX: 640, clientY: 360 });
@@ -70,8 +66,8 @@ pointerdown({ preventDefault() {}, clientX: 640, clientY: 360 });
 const start = 0;
 for (let i = 0; i < 240; i++) tick(start + i * 16.7); // 約4秒
 
-const overlayPhase = elements.overlay.dataset.phase;
-console.log(`frames=${frames} overlay=${overlayPhase} painted=${painted ? painted.data.length : 0}`);
+const overlayPhase = elements.stage.dataset.phase;
+console.log(`frames=${frames} phase=${overlayPhase} painted=${painted ? painted.data.length : 0}`);
 
 // 画面が一色ではないこと（実際に描けている）
 let colors = new Set();

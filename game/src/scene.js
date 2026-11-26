@@ -105,10 +105,11 @@ function toolkit(f) {
 
 // ---------------------------------------------------------------- 寝具の形
 export const BED = {
-  pillow: { x: 20, y: 110, w: 82, h: 24, r: 7 },
-  mattress: { x: 16, y: 130, w: 292, h: 40, r: 6 },
-  duvet: { x0: 62, x1: 308, bottom: 164 },
-  head: { cx: 58, cy: 110 }, // 顔の中心（スプライトのアンカー）
+  pillow: { x: 20, y: 110, w: 78, h: 23, r: 7 },
+  // 敷き布団は体の長さに合わせる（画面の端まで伸ばさない＝部屋が見える）
+  mattress: { x: 14, y: 130, w: 236, h: 38, r: 6 },
+  duvet: { x0: 60, x1: 248, bottom: 162 },
+  head: { cx: 56, cy: 110 }, // 顔の中心（スプライトのアンカー）
 };
 
 /**
@@ -116,14 +117,16 @@ export const BED = {
  * 蚊の着地点もこの線の上になる。
  */
 export function bedTop(x) {
-  if (x <= BED.duvet.x0) return 121;
-  if (x < 94) return lerp(121, 103, (x - BED.duvet.x0) / 32); // 肩（頭の下に潜り込む）
-  if (x < 134) return lerp(103, 108, (x - 94) / 40); // 二の腕のくぼみ
-  if (x < 182) return 108 - Math.sin(((x - 134) / 48) * Math.PI) * 1.2; // 腰
-  if (x < 234) return lerp(108, 101, (x - 182) / 52); // 尻から腿
-  if (x < 268) return lerp(101, 106, (x - 234) / 34); // 膝下
-  if (x < 294) return lerp(106, 97, (x - 268) / 26); // 爪先が布団を押し上げる
-  return 97;
+  // 肩 → 胸のくぼみ → 腰 → 腿 → 膝 → 足先。体の長さ（頭 56 〜 足先 248）に合わせた起伏。
+  if (x <= BED.duvet.x0) return 120;
+  if (x < 86) return lerp(120, 103, (x - BED.duvet.x0) / 26); // 肩
+  if (x < 112) return lerp(103, 107, (x - 86) / 26); // 胸のくぼみ
+  if (x < 140) return lerp(107, 103, (x - 112) / 28); // 腰
+  if (x < 168) return lerp(103, 109, (x - 140) / 28); // 腿
+  if (x < 196) return lerp(109, 100, (x - 168) / 28); // 膝が布団を持ち上げる
+  if (x < 226) return lerp(100, 108, (x - 196) / 30); // すね
+  if (x < 244) return lerp(108, 101, (x - 226) / 18); // つま先
+  return 101;
 }
 
 export const surfaceY = (x) => bedTop(clamp(x, BED.duvet.x0 + 2, BED.duvet.x1 - 2)) + 2;
@@ -167,8 +170,8 @@ function drawRoom(tk, pal, opts = {}) {
 }
 
 // 障子 / ブラインド / 開け窓。光源はどれも「窓」なので共通の枠で描く。
-function drawShoji(tk, pal) {
-  const x0 = 178, y0 = 8, x1 = 292, y1 = 76;
+function drawShoji(tk, pal, box = {}) {
+  const x0 = box.x0 ?? 178, y0 = box.y0 ?? 8, x1 = box.x1 ?? 292, y1 = box.y1 ?? 76;
   // 外の光が壁ににじむ
   tk.wash(x0 - 26, y0 - 12, x1 + 26, y1 + 22, pal.glass, (x, y) => {
     const dx = Math.max(x0 - x, 0, x - x1);
@@ -424,8 +427,8 @@ export function drawSleeperHead(pIn, t, mood = 0, palParam = C, expr = "sleep", 
   const px = (x, y, c) => p.put(ox + x, oy + y, c);
 
   // 月明かり：顔の左上（額と頬）をわずかに拾う
-  p.put(ox + 17, oy + 12, pal.skinHi);
-  p.put(ox + 16, oy + 13, pal.skinHi);
+  p.put(ox + 17, oy + 11, pal.skinHi);
+  p.put(ox + 16, oy + 12, pal.skinHi);
 
   if (expr === "happy") {
     // 目を ^ ^ に、口を大きく笑わせる
@@ -492,22 +495,27 @@ export function drawDuvet(pIn, t, pal) {
 
   for (let x = d.x0; x <= d.x1; x++) {
     const y0 = Math.round(duvetTop(x, t));
-    if (y0 >= d.bottom - 6) continue;
-    const h = d.bottom - y0;
-    const b1 = y0 + 6;
+    // 足元は丸める（切りっぱなしの縦線に見えないように）
+    const endK = Math.min(1, (d.x1 - x) / 7);
+    const round2 = (1 - endK) * (1 - endK);
+    const top = y0 + Math.round(round2 * 7);
+    const bottom = d.bottom - Math.round(round2 * 7);
+    if (top >= bottom - 6) continue;
+    const h = bottom - top;
+    const b1 = top + 6;
     const b2 = b1 + Math.round(h * 0.4);
     const b3 = b1 + Math.round(h * 0.72);
     // 稜線：上を向いた面だけ明るく
-    p.rect(x, y0, 1, 1, cTop);
-    p.rect(x, y0 + 1, 1, 2, pal.blanketHi);
-    if (x > 78 && x < 116) p.rect(x, y0 + 3, 1, 1, pal.sheetFold);
+    p.rect(x, top, 1, 1, cTop);
+    p.rect(x, top + 1, 1, 2, pal.blanketHi);
+    if (x > 78 && x < 116) p.rect(x, top + 3, 1, 1, pal.sheetFold);
     // 本体（稜線の下から帯ごとに）
-    p.rect(x, y0 + 3, 1, b1 - (y0 + 3), blanket);
+    p.rect(x, top + 3, 1, b1 - (top + 3), blanket);
     p.rect(x, b1, 1, b2 - b1, blanket);
     p.rect(x, b2, 1, b3 - b2, cMid);
-    p.rect(x, b3, 1, d.bottom - 3 - b3, cBot);
+    p.rect(x, b3, 1, bottom - 3 - b3, cBot);
     // 接地
-    p.rect(x, d.bottom - 3, 1, 3, cDeep);
+    p.rect(x, bottom - 3, 1, 3, cDeep);
   }
 
   // キルティングの縦線
@@ -549,12 +557,12 @@ function makeSpots(hx, hy) {
   const oy = hy - HEAD_ANCHOR.y;
   const face = (sx, sy) => ({ x: ox + sx, y: oy + sy, kind: "skin" });
   const spots = [
-    face(26, 20),  // 頬
-    face(17, 13),  // こめかみ
-    face(21, 24),  // あご
-    face(21, 20),  // 鼻のあたり
+    face(28, 17),  // 頬
+    face(16, 11),  // こめかみ
+    face(21, 21),  // あご
+    face(21, 16),  // 鼻のあたり
     face(HEAD_EAR.x + 1, HEAD_EAR.y), // 耳
-    face(28, 15),  // 目じり
+    face(31, 13),  // 目じり
   ];
   // 布団の稜線（安全）
   for (let x = 92; x <= 296; x += 26) {
@@ -570,6 +578,218 @@ function makeSpots(hx, hy) {
 
 // 月明かりの届く範囲（＝蚊のシルエットが読える）
 const inBeam = (x, y) => y < 104;
+
+
+// ---------------------------------------------------------------- 部屋の小道具
+// 和室：床の間（掛け軸・花器）
+function drawTokonoma(tk, pal) {
+  const x0 = 248, x1 = W;
+  // 奥の壁（一段暗い）
+  tk.rect(x0, 22, x1 - x0, 70, mix(pal.wallBot, pal.corner, 0.45));
+  tk.rect(x0, 22, 1, 70, pal.corner);
+  tk.rect(x0 + 1, 22, 1, 70, pal.wainscotHi, 0.35);
+  // 床柱
+  tk.rect(x0 - 4, 20, 5, 72, pal.frame);
+  tk.rect(x0 - 3, 20, 1, 72, pal.frameHi, 0.7);
+  // 床板（框の縁）
+  tk.rect(x0, 84, x1 - x0, 8, pal.wainscot);
+  tk.rect(x0, 84, x1 - x0, 1, pal.wainscotHi);
+  tk.rect(x0, 88, x1 - x0, 4, pal.floorSeam);
+  // 掛け軸
+  const sx = 272, sw = 22;
+  tk.rect(sx, 28, sw, 2, pal.frameHi);           // 上の軸
+  tk.rect(sx + 1, 30, sw - 2, 40, pal.paper);    // 本紙
+  for (let y = 30; y < 70; y++) tk.rect(sx + 1, y, sw - 2, 1, mix(pal.paperHi, pal.paperShade, (y - 30) / 40));
+  tk.rect(sx + 1, 30, sw - 2, 1, pal.paperLo);
+  tk.rect(sx, 70, sw, 2, pal.frame);             // 下の軸
+  // 墨の一筆（円相）
+  const cx = sx + 11, cy = 50;
+  for (let a = 0; a < 300; a += 3) {
+    const r = a / 300;
+    const ang = (a * Math.PI) / 180;
+    tk.put(cx + Math.cos(ang) * (7 + r * 0.6), cy + Math.sin(ang) * (8 + r * 0.6), pal.corner, 0.55 + r * 0.25);
+    tk.put(cx + Math.cos(ang) * (7 - r * 0.5), cy + Math.sin(ang) * (8 - r * 0.5), pal.corner, 0.3 + r * 0.2);
+  }
+  // 花器と一枝
+  const vx = 308, vy = 82;
+  tk.ellipse(vx, vy - 3, 4, 2, pal.frameHi);
+  tk.rect(vx - 4, vy - 1, 9, 1, pal.frameHi);
+  tk.ellipse(vx, vy + 3, 4, 4, pal.wainscotHi);
+  tk.ellipse(vx - 1, vy + 2, 2, 3, pal.frameHi, 0.5);
+  for (const [ax, ay] of [[-6, -16], [1, -20], [5, -13]]) {
+    tk.line(vx, vy, vx + ax, vy + ay, pal.floorSeam, 0.85);
+    tk.ellipse(vx + ax, vy + ay, 2, 2, pal.lip);
+    tk.put(vx + ax, vy + ay - 1, pal.pillowHi, 0.8);
+  }
+}
+
+// 和室：ちゃぶ台（お茶）
+function drawChabudai(tk, pal) {
+  const x = 262, y = 146, w = 52, h = 8;
+  tk.rect(x + 6, y + h, 4, 26, pal.frame);
+  tk.rect(x + w - 10, y + h, 4, 26, pal.frame);
+  tk.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, pal.wainscotHi);
+  tk.ellipse(x + w / 2, y + h / 2 - 1, w / 2 - 1, h / 2 - 1, pal.frameHi);
+  tk.ellipse(x + w / 2, y + h / 2 + 1, w / 2 - 2, h / 2 - 2, pal.frame, 0.45);
+  // 急須と湯のみ
+  tk.ellipse(x + 16, y - 2, 5, 4, pal.wainscotLo);
+  tk.ellipse(x + 15, y - 3, 4, 3, pal.wainscotHi);
+  tk.rect(x + 21, y - 4, 4, 1, pal.wainscotLo);
+  tk.put(x + 25, y - 5, pal.wainscotLo);
+  tk.ellipse(x + 38, y - 1, 3, 2, pal.paper);
+  tk.ellipse(x + 30, y - 1, 3, 2, pal.paperHi);
+  // 座布団
+  tk.round(x + 4, y + h + 24, 34, 9, 3, pal.blanketLo);
+  tk.round(x + 6, y + h + 24, 30, 6, 3, pal.blanket, 0.7);
+}
+
+// 和室：ぶら下がり行灯
+function drawPendant(tk, pal, t) {
+  const x = 150, y = 0;
+  tk.rect(x, y, 1, 20, pal.corner);
+  tk.rect(x - 7, 20, 15, 1, pal.frame);
+  tk.round(x - 6, 21, 13, 15, 2, pal.frame);
+  tk.round(x - 5, 22, 11, 13, 2, pal.paperShade);
+  tk.round(x - 4, 23, 9, 11, 2, pal.paperLo);
+  tk.wash(x - 14, 14, x + 15, 44, pal.paperHi, (px, py) => {
+    const d = Math.hypot(px - x, py - 28);
+    return clamp(1 - d / 14, 0, 1) * 0.35;
+  });
+}
+
+// 洋室：ベッドの枠（ヘッドボードと脚）
+function drawBedFrame(tk, pal) {
+  // ヘッドボード（枕の奥）
+  tk.rect(4, 78, 22, 44, pal.frame);
+  tk.rect(5, 79, 20, 42, pal.frameHi, 0.55);
+  tk.rect(8, 82, 14, 34, pal.frame);
+  for (let y = 84; y < 114; y += 6) tk.rect(9, y, 12, 1, pal.frameHi, 0.35);
+  // 支柱
+  tk.rect(4, 74, 6, 96, pal.frame);
+  tk.rect(4, 74, 1, 96, pal.frameHi, 0.8);
+  tk.ellipse(7, 74, 4, 3, pal.frameHi);
+  // マットレスの前縁（木の枠）
+  tk.rect(4, 168, 250, 5, pal.frame);
+  tk.rect(4, 168, 250, 1, pal.frameHi);
+  tk.rect(4, 172, 250, 1, pal.corner);
+  for (let x = 30; x < 250; x += 54) tk.rect(x, 169, 2, 3, pal.frameHi, 0.5);
+}
+
+// 洋室：机とモニタ、椅子
+function drawDesk(tk, pal, t) {
+  const x = 254, y = 118, w = 66;
+  // モ二タ（青白い光）
+  tk.wash(x, 84, W, 132, pal.glass, (px, py) => {
+    const d = Math.hypot((px - (x + 32)) * 0.9, py - 104);
+    return clamp(1 - d / 34, 0, 1) * 0.22;
+  });
+  tk.rect(x + 6, 96, 44, 24, pal.frame);
+  tk.rect(x + 7, 97, 42, 22, pal.clockFace);
+  for (let y = 98; y < 118; y++) tk.rect(x + 8, y, 40, 1, mix(pal.glass, pal.clockFace, (y - 98) / 20));
+  for (let i = 0; i < 5; i++) tk.rect(x + 10, 100 + i * 4, 14 + i * 3, 1, pal.slatHi, 0.55);
+  tk.rect(x + 12, 112, 10, 1, pal.paper, 0.5);
+  tk.rect(x + 26, 120, 4, 6, pal.frame);
+  tk.rect(x + 16, 124, 24, 3, pal.frameHi);
+  // 机の天板
+  tk.rect(x, y, w, 4, pal.frameHi);
+  tk.rect(x, y, w, 1, pal.paper, 0.22);
+  tk.rect(x, y + 4, w, 2, pal.frame);
+  // 脚
+  tk.rect(x + 3, y + 6, 5, 44, pal.frame);
+  tk.rect(x + w - 8, y + 6, 5, 44, pal.frame);
+  tk.rect(x + 3, y + 6, 1, 44, pal.frameHi, 0.6);
+  // キーボードとマグ
+  tk.rect(x + 12, y - 3, 26, 3, pal.wainscotHi);
+  tk.rect(x + 12, y - 3, 26, 1, pal.frameHi);
+  tk.rect(x + 46, y - 6, 6, 6, pal.paperLo);
+  tk.ellipse(x + 49, y - 6, 3, 1, pal.paper);
+  // 椅子（手前）
+  tk.round(x + 20, y + 34, 28, 8, 3, pal.frame);
+  tk.round(x + 21, y + 33, 26, 5, 3, pal.frameHi, 0.6);
+  tk.rect(x + 23, y + 42, 3, 18, pal.frame);
+  tk.rect(x + 42, y + 42, 3, 18, pal.frame);
+  tk.rect(x + 32, y + 40, 4, 14, pal.frame, 0.8);
+}
+
+// 洋室：壁のポスター
+function drawPoster(tk, pal) {
+  const x = 42, y = 26, w = 34, h = 44;
+  tk.rect(x - 1, y - 1, w + 2, h + 2, pal.frame);
+  tk.rect(x, y, w, h, mix(pal.wainscotHi, pal.glass, 0.35));
+  for (let i = 0; i < 3; i++) tk.rect(x + 3, y + 6 + i * 12, w - 6, 2, pal.paperLo, 0.8);
+  tk.ellipse(x + w / 2, y + 16, 7, 7, pal.lip, 0.75);
+  tk.ellipse(x + w / 2 - 2, y + 14, 3, 3, pal.pillowHi, 0.8);
+  tk.rect(x + 4, y + h - 8, w - 8, 3, pal.paper, 0.55);
+  // 押しピン
+  tk.put(x + 3, y + 3, pal.lip);
+  tk.put(x + w - 4, y + 3, pal.lip);
+}
+
+// 夏：風鈴
+function drawChime(tk, pal, t) {
+  const x = 130, y = 0;
+  tk.rect(x, y, 1, 14, pal.corner);
+  tk.rect(x - 4, 14, 9, 1, pal.frame);
+  tk.ellipse(x, 19, 5, 5, pal.glass, 0.85);
+  tk.ellipse(x, 19, 4, 4, pal.paperHi, 0.35);
+  tk.ellipse(x - 1, 18, 2, 2, pal.starHi, 0.6);
+  tk.rect(x - 3, 24, 7, 1, pal.frameHi);
+  tk.rect(x, 24, 1, 5, pal.corner, 0.8);
+  // 短冊
+  const sway = Math.round(Math.sin(t * 1.6) * 1);
+  tk.rect(x - 3 + sway, 29, 7, 13, pal.paperLo);
+  tk.rect(x - 3 + sway, 29, 7, 1, pal.paper);
+  for (let i = 0; i < 4; i++) tk.rect(x - 1 + sway, 32 + i * 3, 3, 1, pal.paperShade, 0.8);
+}
+
+// 夏：蚊取り線香（煙つき）
+function drawCoil(tk, pal, t) {
+  const x = 262, y = 158;
+  tk.ellipse(x + 8, y + 8, 12, 4, pal.corner, 0.5);
+  tk.ellipse(x + 8, y + 5, 11, 4, pal.paperLo);
+  tk.ellipse(x + 8, y + 4, 9, 3, pal.pillow, 0.85);
+  // 渦
+  for (let a = 0; a < 900; a += 6) {
+    const r = a / 900;
+    const ang = (a * Math.PI) / 180;
+    tk.put(x + 8 + Math.cos(ang) * (7 - r * 6), y + 5 + Math.sin(ang) * (2.6 - r * 2.2), r > 0.92 ? pal.lip : pal.frameHi);
+  }
+  // 煙
+  for (let i = 0; i < 16; i++) {
+    const ph = t * 0.6 + i * 0.12;
+    const yy = y + 2 - i * 2.2;
+    const xx = x + 8 + Math.sin(ph * 2.2 + i * 0.4) * (1 + i * 0.35);
+    tk.put(xx, yy, pal.paperHi, clamp(0.5 - i * 0.028, 0, 0.5));
+  }
+}
+
+// 夏：すだれ（窓の上をおおう）
+function drawSudare(tk, pal) {
+  const x0 = 148, y0 = 6, x1 = 300;
+  const h = 22;
+  tk.rect(x0 - 2, y0, x1 - x0 + 4, h, pal.wainscotLo, 0.55);
+  for (let y = y0; y < y0 + h; y += 2) tk.rect(x0, y, x1 - x0, 1, pal.wainscotHi, 0.9);
+  tk.rect(x0 - 2, y0, x1 - x0 + 4, 2, pal.frame);
+  tk.rect(x0 - 2, y0 + h - 2, x1 - x0 + 4, 2, pal.frameHi);
+  for (let x = x0 + 8; x < x1; x += 26) tk.rect(x, y0, 1, h, pal.frame, 0.7);
+}
+
+// 夏：窓の外のほたる
+function drawFireflies(p, t, pal) {
+  const q = hexPaint(p);
+  const spots = [[170, 52], [214, 30], [262, 58], [132, 40]];
+  for (let i = 0; i < spots.length; i++) {
+    const ph = t * (0.7 + i * 0.13) + i * 2.1;
+    const x = spots[i][0] + Math.sin(ph * 1.3) * 9;
+    const y = spots[i][1] + Math.cos(ph) * 5;
+    const k = Math.max(0, Math.sin(t * 1.7 + i * 1.9)) ** 3;
+    if (k < 0.05) continue;
+    q.put(x, y, pal.starHi, k);
+    q.put(x + 1, y, pal.moon, k * 0.5);
+    q.put(x - 1, y, pal.moon, k * 0.4);
+    q.put(x, y + 1, pal.moon, k * 0.35);
+  }
+}
 
 // ---------------------------------------------------------------- ステージ定義
 /** パレットは数値に直してから使う（mix が数値を要求するため）。 */
@@ -617,7 +837,10 @@ function buildWashitsu() {
     blanketLo: "#282141",
   });
   drawRoom(tk, pal, { floor: "tatami" });
-  drawShoji(tk, pal);
+  drawTokonoma(tk, pal);
+  drawShoji(tk, pal, { x0: 26, y0: 10, x1: 152, y1: 72 });
+  drawPendant(tk, pal, 0);
+  drawChabudai(tk, pal);
   drawBedding(tk, pal);
   return {
     spots: makeSpots(BED.head.cx, BED.head.cy),
@@ -683,8 +906,11 @@ function buildYoshitsu() {
     blanketLo: "#1f2a40",
   });
   drawRoom(tk, pal, { floor: "wood" });
+  drawPoster(tk, pal);
   drawBlinds(tk, pal);
   drawClock(tk, pal);
+  drawBedFrame(tk, pal);
+  drawDesk(tk, pal, 0);
   drawBedding(tk, pal);
   return {
     spots: makeSpots(BED.head.cx, BED.head.cy),
@@ -762,7 +988,10 @@ function buildNatsu() {
   });
   drawRoom(tk, pal, { floor: "tatami" });
   drawNightWindow(tk, pal);
+  drawSudare(tk, pal);
+  drawChime(tk, pal, 0);
   drawFanStand(tk, pal);
+  drawCoil(tk, pal, 0);
   drawBedding(tk, pal);
   return {
     spots: makeSpots(BED.head.cx, BED.head.cy),
