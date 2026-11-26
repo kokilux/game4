@@ -135,6 +135,46 @@ console.log("KA ロジック");
 }
 
 {
+  // 3連続で倒すとコンボ特典（加点と演出）が入る
+  const g = createGame({ seed: 5 });
+  g.start();
+  const base = g.state.score;
+  let got = null;
+  for (let i = 0; i < 6000 && !got; i++) {
+    const b = g.state.bugs[0];
+    if (b && (b.state === "land" || b.state === "hover")) { g.pointer(b.x, b.y); g.slap(); }
+    g.update(STEP);
+    if (g.state.combo >= 3 && g.state.comboFx) got = { ...g.state.comboFx };
+  }
+  check("3連続でコンボ特典が入る", !!got && got.bonus > 0, JSON.stringify(got));
+  check("コンボ特典でスコアが増える", g.state.score > base + 300, `score=${g.state.score}`);
+}
+
+{
+  // 空振りを重ねると、寝ている人を起こして失敗する
+  const g = createGame({ seed: 6 });
+  g.start();
+  let n = 0;
+  for (let i = 0; i < 6000 && g.state.phase === "play"; i++) {
+    if (i % 40 === 0) { g.pointer(210, 152); g.slap(); n++; }
+    g.update(STEP);
+  }
+  check("ミスが重なると起こして失敗する", g.state.endReason === "woke" && g.state.phase === "over", `reason=${g.state.endReason} phase=${g.state.phase} misses=${g.state.misses}`);
+  g.draw(g.snapshot());
+  check("起こされた演出が描ける", true);
+}
+
+{
+  // 10部屋ぶんのステージがある
+  const g = createGame({ seed: 2 });
+  let n = 0;
+  while (g.state.stageIndex < 9 && n++ < 20) g.nextStage();
+  check("ステージは10ある", g.state.stageIndex === 9, `stage=${g.state.stageIndex}`);
+  check("最後の夜は蚊帳の間", g.state.world.name === "NET", g.state.world.name);
+  check("夜ごとに蚊が増える", g.state.world.bugs >= 10, String(g.state.world.bugs));
+}
+
+{
   // 同じ種なら同じ結果（Math.random を使っていない証拠）
   const trace = (seed) => {
     const g = createGame({ seed });

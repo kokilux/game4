@@ -133,6 +133,19 @@ export function createAudio() {
       if (!ctx) return;
       tone(520, 0.05, { type: "sine", gain: 0.05 });
     },
+    /** コンボ：上がっていく短いアルペジオ（特典の合図）。 */
+    combo(n = 3) {
+      if (!ctx) return;
+      const base = 660 + Math.min(6, n) * 40;
+      [0, 1, 2].forEach((i) => tone(base * (1 + i * 0.26), 0.16, { type: "triangle", gain: 0.085, delay: i * 0.055 }));
+    },
+    /** 起きてしまった：警告の2音。 */
+    wake() {
+      if (!ctx) return;
+      tone(180, 0.22, { type: "square", gain: 0.11, to: 120 });
+      tone(240, 0.24, { type: "square", gain: 0.09, to: 140, delay: 0.18 });
+      noise(0.3, { type: "bandpass", freq: 500, gain: 0.12, q: 1.1 });
+    },
     start() {
       if (!ctx) return;
       tone(440, 0.18, { type: "triangle", gain: 0.1 });

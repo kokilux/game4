@@ -118,6 +118,8 @@ function drainEvents() {
     else if (e.type === "land") audio.land();
     else if (e.type === "end") audio.end(e.reason === "clear" || e.reason === "dawn");
     else if (e.type === "menu") audio.swing();
+    else if (e.type === "combo") audio.combo(e.n);
+    else if (e.type === "wake") audio.wake();
     else if (e.type === "clearScreen") audio.end(true);
   }
 }

@@ -11,6 +11,7 @@
 import { createFrame, hex, mix } from "../../vendor/pixelfx/src/core/index.js";
 import { C } from "./palette.js";
 import { HEAD_ROWS, HEAD_ANCHOR, HEAD_EAR } from "./head-rows.js";
+import { headFor } from "./heads.js";
 
 export const W = 320;
 export const H = 180;
@@ -389,6 +390,10 @@ const HEAD_PAL = (pal) => ({
   E: pal.eye,
   N: pal.skinDeep,
   M: pal.mouth,
+  C: pal.cap ?? pal.hair,
+  c: pal.capHi ?? pal.hairHi,
+  G: pal.hairGrey ?? pal.hairHi,
+  g: pal.hairGreyHi ?? pal.hairHi,
 });
 
 /** 頭の位置（スプライトの左上）。 */
@@ -422,7 +427,7 @@ export function drawSleeperHead(pIn, t, mood = 0, palParam = C, expr = "sleep", 
   const base = headOrigin(t, mood);
   const ox = base.x + Math.round(shakeX);
   const oy = base.y;
-  p.sprite(HEAD_ROWS, HEAD_PAL(pal), ox, oy);
+  p.sprite(pal.headRows ?? HEAD_ROWS, HEAD_PAL(pal), ox, oy);
 
   const px = (x, y, c) => p.put(ox + x, oy + y, c);
 
@@ -441,6 +446,20 @@ export function drawSleeperHead(pIn, t, mood = 0, palParam = C, expr = "sleep", 
     px(16, 22, pal.mouth); px(23, 22, pal.mouth);
     for (let x = 17; x <= 22; x++) px(x, 23, pal.mouth);
     px(14, 20, pal.zit); px(27, 19, pal.zit); // 頬の赤み
+  } else if (expr === "awake") {
+    // 起こされた：目を見開き、眉が上がり、口が開く（汗も）
+    for (const x0 of [12, 23]) {
+      for (let y = 12; y <= 14; y++) for (let i = 0; i < 5; i++) px(x0 + i, y, pal.skinHi);
+      px(x0 + 1, 13, pal.eye); px(x0 + 2, 13, pal.eye);
+      px(x0 + 1, 14, pal.eye); px(x0 + 2, 14, pal.eye);
+      px(x0 + 1, 12, pal.eye); px(x0 + 2, 12, pal.eye);
+    }
+    for (const x0 of [12, 23]) for (let i = 0; i < 5; i++) px(x0 + i, 9, pal.brow);
+    // 口（驚いて開いている）
+    for (let y = 19; y <= 21; y++) for (let x = 18; x <= 22; x++) px(x, y, pal.mouth);
+    for (let x = 19; x <= 21; x++) px(x, 20, pal.skinDeep);
+    // 汗
+    px(30, 13, pal.skinHi); px(30, 14, pal.skinHi); px(31, 15, pal.skinHi); px(30, 15, pal.skinHi);
   } else if (expr === "ouch") {
     // 眉を寄せ、目をぎゅっと閉じ、口を開ける
     for (let x = 15; x <= 26; x++) { px(x, 13, pal.skin); px(x, 14, pal.skin); }
@@ -791,6 +810,692 @@ function drawFireflies(p, t, pal) {
   }
 }
 
+// ---------------------------------------------------------------- 追加の部屋（4〜10晩目）
+// どの部屋も「窓・壁・家具・小物」の組み合わせを変えて、一目で別の部屋に見えるようにする。
+
+/** 街の夜景（ホテル）。窓いっぱいに、灯りの点いたビルを並べる。 */
+function drawCityWindow(tk, pal) {
+  const x0 = 152, y0 = 8, x1 = 306, y1 = 78;
+  tk.round(x0 - 4, y0 - 4, x1 - x0 + 8, y1 - y0 + 8, 2, pal.frame);
+  tk.rect(x0, y0, x1 - x0, y1 - y0, pal.skyLo);
+  for (let y = y0; y < y1; y++) tk.rect(x0, y, x1 - x0, 1, mix(pal.skyHi, pal.skyLo, (y - y0) / (y1 - y0)));
+  // 遠くのビル群
+  let bx = x0 + 2;
+  for (let i = 0; bx < x1 - 3; i++) {
+    const bw = 8 + ((i * 7) % 11);
+    const bh = 10 + ((i * 13) % 34);
+    const by = y1 - bh;
+    tk.rect(bx, by, Math.min(bw, x1 - 2 - bx), bh, mix(pal.wall, pal.corner, 0.55));
+    tk.rect(bx, by, Math.min(bw, x1 - 2 - bx), 1, pal.frameHi, 0.6);
+    // 窓の灯り
+    for (let wy = by + 3; wy < y1 - 2; wy += 4)
+      for (let wx = bx + 2; wx < bx + bw - 2; wx += 3) {
+        const h = Math.sin(wx * 12.9898 + wy * 78.233) * 43758.5453;
+        if ((h - Math.floor(h)) > 0.55) tk.put(wx, wy, pal.windowLight ?? pal.warm, 0.85);
+      }
+    bx += bw + 2;
+  }
+  // 塔（赤い航空灯）
+  tk.rect(x1 - 26, y0 + 6, 3, 30, pal.frame);
+  tk.put(x1 - 25, y0 + 5, pal.clockLed ?? pal.zit);
+  // 窓枠
+  tk.rect(x0, y0, x1 - x0, 1, pal.frameHi);
+  tk.rect(x0, y1 - 1, x1 - x0, 1, pal.frame);
+  tk.rect(x0 + (x1 - x0) / 2 - 1, y0, 2, y1 - y0, pal.frame);
+  // カーテン
+  for (let i = 0; i < 2; i++) {
+    const cx = i ? x1 - 16 : x0 + 2;
+    tk.rect(cx, y0, 14, y1 - y0, pal.curtain);
+    for (let x = 0; x < 14; x += 4) tk.rect(cx + x, y0, 2, y1 - y0, pal.curtainHi, 0.6);
+  }
+}
+
+/** ホテルの机とランプ、スーツケース。 */
+function drawHotelSet(tk, pal) {
+  const x = 254, y = 120;
+  tk.rect(x, y, 66, 4, pal.frame);
+  tk.rect(x, y, 66, 1, pal.frameHi);
+  tk.rect(x + 4, y + 4, 4, 46, pal.frame);
+  tk.rect(x + 58, y + 4, 4, 46, pal.frame);
+  // ランプ
+  tk.rect(x + 8, y - 22, 10, 14, pal.lampShade);
+  tk.rect(x + 8, y - 22, 10, 1, pal.frameHi);
+  tk.rect(x + 12, y - 8, 2, 8, pal.frame);
+  tk.wash(x - 6, y - 40, x + 40, y + 10, pal.warm, (px, py) => {
+    const d = Math.hypot(px - (x + 13), py - (y - 14));
+    return clamp(1 - d / 30, 0, 1) * 0.3;
+  });
+  // ボトルとグラス
+  tk.rect(x + 30, y - 10, 4, 10, pal.glassDark ?? pal.wainscotLo);
+  tk.rect(x + 31, y - 14, 2, 5, pal.glassDark ?? pal.wainscotLo);
+  tk.put(x + 32, y - 15, pal.paper, 0.8);
+  tk.rect(x + 40, y - 7, 4, 7, pal.paper, 0.45);
+  tk.rect(x + 39, y - 7, 6, 1, pal.paper, 0.8);
+  // スーツケース
+  tk.round(x + 10, y + 30, 34, 22, 2, pal.frame);
+  tk.round(x + 11, y + 31, 32, 20, 2, pal.wainscotHi);
+  tk.rect(x + 26, y + 28, 2, 4, pal.frameHi);
+  tk.rect(x + 12, y + 38, 30, 1, pal.frameHi, 0.7);
+}
+
+/** 山小屋：丸太の壁と暖炉、雪の窓。 */
+function drawLogWall(tk, pal) {
+  for (let y = 2; y < 92; y += 9) {
+    tk.rect(0, y, W, 8, mix(pal.wallTop, pal.wall, (y / 92) * 0.6));
+    tk.rect(0, y + 7, W, 2, pal.corner, 0.5);
+    tk.rect(0, y, W, 1, pal.frameHi, 0.25);
+  }
+  // 節
+  for (const [x, y] of [[36, 31], [120, 48], [210, 22], [268, 66]]) tk.ellipse(x, y, 2, 1.4, pal.frame, 0.8);
+}
+
+function drawFireplace(tk, pal, t = 0) {
+  const x = 246, y = 34;
+  // 石組み
+  tk.rect(x, y, W - x, 58, pal.stone);
+  for (let i = 0; i < 26; i++) {
+    const sx = x + 2 + ((i * 17) % (W - x - 6));
+    const sy = y + 3 + ((i * 29) % 42);
+    tk.round(sx, sy, 9, 5, 1, i % 2 ? pal.stoneHi : pal.stoneLo);
+  }
+  // 火口
+  const fx = x + 12, fy = y + 20, fw = 40, fh = 30;
+  tk.rect(fx, fy, fw, fh, pal.corner);
+  tk.rect(fx + 2, fy + fh - 12, fw - 4, 12, pal.fireLo);
+  tk.rect(fx + 6, fy + fh - 9, fw - 12, 9, pal.fire);
+  tk.rect(fx + 12, fy + fh - 5, fw - 24, 5, pal.fireHi);
+  // 炎
+  for (let i = 0; i < 5; i++) {
+    const h = 6 + Math.abs(Math.sin(i * 2.1)) * 9;
+    tk.ellipse(fx + 10 + i * 5, fy + fh - 12 - h / 2, 2.2, h / 2, i % 2 ? pal.fire : pal.fireHi, 0.85);
+  }
+  // 光が床と壁に落ちる
+  tk.wash(x - 10, y, W, 150, pal.fire, (px, py) => {
+    const d = Math.hypot((px - (fx + 18)) * 0.8, py - (fy + fh));
+    return clamp(1 - d / 46, 0, 1) ** 2 * 0.13;
+  });
+  // マントルとマグ
+  tk.rect(x - 6, y - 4, W - x + 6, 4, pal.frame);
+  tk.rect(x - 6, y - 4, W - x + 6, 1, pal.frameHi);
+  tk.rect(x + 8, y - 11, 7, 7, pal.paperLo);
+  tk.rect(x + 15, y - 9, 2, 4, pal.paperLo);
+}
+
+function drawSnowWindow(tk, pal, t = 0) {
+  const x0 = 34, y0 = 12, x1 = 128, y1 = 66;
+  tk.round(x0 - 4, y0 - 4, x1 - x0 + 8, y1 - y0 + 8, 2, pal.frame);
+  tk.rect(x0, y0, x1 - x0, y1 - y0, pal.skyLo);
+  for (let y = y0; y < y1; y++) tk.rect(x0, y, x1 - x0, 1, mix(pal.skyHi, pal.skyLo, (y - y0) / (y1 - y0)));
+  // 杉のシルエットと雪原
+  for (const [tx, th] of [[x0 + 12, 22], [x0 + 30, 30], [x0 + 54, 18], [x0 + 76, 26]]) {
+    for (let i = 0; i < th; i += 4) {
+      const w = ((th - i) / th) * 7;
+      tk.rect(Math.round(tx - w / 2), y1 - 8 - i, Math.round(w), 4, mix(pal.corner, pal.wall, 0.3));
+    }
+  }
+  tk.rect(x0, y1 - 9, x1 - x0, 9, pal.snow);
+  tk.rect(x0, y1 - 9, x1 - x0, 1, pal.snowHi);
+  // 雪
+  for (let i = 0; i < 40; i++) {
+    const sx = x0 + 2 + ((i * 37) % (x1 - x0 - 4));
+    const sy = y0 + 2 + ((i * 53) % (y1 - y0 - 4));
+    tk.put(sx, sy, i % 3 ? pal.snowHi : pal.snow, 0.75);
+  }
+  // 窓枠（十字）
+  tk.rect(x0, y0, x1 - x0, 1, pal.frameHi);
+  tk.rect(x0, y1 - 1, x1 - x0, 1, pal.frame);
+  tk.rect(x0 + (x1 - x0) / 2 - 1, y0, 2, y1 - y0, pal.frame);
+  tk.rect(x0, y0 + (y1 - y0) / 2 - 1, x1 - x0, 2, pal.frame);
+  // 霜
+  for (let i = 0; i < 10; i++) tk.put(x0 + 1 + i * 3, y1 - 2, pal.snow, 0.5);
+}
+
+/** 夜行列車：丸窓と荷棚、折りたたみテーブル。 */
+function drawTrainWindow(tk, pal) {
+  const x0 = 84, y0 = 16, x1 = 208, y1 = 64;
+  tk.round(x0 - 5, y0 - 5, x1 - x0 + 10, y1 - y0 + 10, 4, pal.frame);
+  tk.round(x0, y0, x1 - x0, y1 - y0, 3, pal.skyLo);
+  for (let y = y0 + 1; y < y1 - 1; y++) tk.rect(x0 + 1, y, x1 - x0 - 2, 1, mix(pal.skyHi, pal.skyLo, (y - y0) / (y1 - y0)));
+  // 遠くの山と街明かり
+  for (let i = 0; i < 4; i++) {
+    const mx = x0 + 8 + i * 30;
+    tk.rect(mx, y1 - 22, 26, 12, mix(pal.corner, pal.wall, 0.35));
+  }
+  tk.rect(x0 + 2, y1 - 11, x1 - x0 - 4, 10, mix(pal.corner, pal.skyLo, 0.5));
+  for (let i = 0; i < 24; i++) {
+    const lx = x0 + 4 + ((i * 41) % (x1 - x0 - 8));
+    const ly = y1 - 9 + (i % 3);
+    tk.put(lx, ly, i % 4 ? pal.warm : pal.paper, 0.8);
+  }
+  // 窓枠
+  tk.rect(x0, y0, x1 - x0, 1, pal.frameHi);
+  tk.rect(x0, y1 - 1, x1 - x0, 1, pal.frame);
+  // カーテン（片側だけ）
+  tk.rect(x0 + 2, y0 + 2, 26, y1 - y0 - 4, pal.curtain);
+  for (let x = 0; x < 26; x += 5) tk.rect(x0 + 2 + x, y0 + 2, 2, y1 - y0 - 4, pal.curtainHi, 0.7);
+  tk.rect(x0 + 28, y0 + 1, 2, y1 - y0 - 2, pal.frameHi, 0.5);
+}
+
+function drawTrainSet(tk, pal) {
+  // 荷棚とバッグ
+  tk.rect(232, 30, 88, 3, pal.frame);
+  tk.rect(232, 30, 88, 1, pal.frameHi);
+  tk.round(244, 14, 34, 16, 3, pal.wainscotHi);
+  tk.rect(250, 12, 12, 3, pal.frame);
+  tk.rect(244, 24, 34, 1, pal.frame, 0.6);
+  // 読書灯
+  tk.rect(300, 44, 2, 14, pal.frame);
+  tk.rect(292, 56, 12, 4, pal.lampShade);
+  tk.wash(280, 50, 318, 92, pal.warm, (px, py) => clamp(1 - Math.hypot(px - 298, py - 60) / 26, 0, 1) * 0.26);
+  // 折りたたみテーブル
+  tk.rect(250, 118, 58, 4, pal.frame);
+  tk.rect(250, 118, 58, 1, pal.frameHi);
+  tk.rect(252, 122, 3, 12, pal.frame);
+  tk.rect(302, 122, 3, 12, pal.frame);
+  tk.rect(258, 110, 12, 8, pal.paper, 0.6); // 切符
+  tk.rect(258, 110, 12, 1, pal.paper);
+  tk.rect(276, 106, 6, 12, pal.paperLo); // コップ
+  tk.ellipse(279, 106, 3, 1, pal.paperHi);
+  // 手すり（寝台の縁）
+  tk.rect(4, 170, 246, 3, pal.frameHi);
+  tk.rect(4, 170, 246, 1, pal.paper, 0.15);
+}
+
+/** 海辺：水平線と月の道、風になびくカーテン。 */
+function drawSeaWindow(tk, pal) {
+  const x0 = 116, y0 = 10, x1 = 300, y1 = 80;
+  tk.round(x0 - 5, y0 - 5, x1 - x0 + 10, y1 - y0 + 10, 3, pal.frame);
+  tk.rect(x0, y0, x1 - x0, y1 - y0, pal.skyLo);
+  for (let y = y0; y < y1; y++) tk.rect(x0, y, x1 - x0, 1, mix(pal.skyHi, pal.seaSky, (y - y0) / (y1 - y0)));
+  const horizon = y0 + 36;
+  // 海
+  for (let y = horizon; y < y1; y++) {
+    const k = (y - horizon) / (y1 - horizon);
+    tk.rect(x0, y, x1 - x0, 1, mix(pal.seaFar, pal.seaNear, k));
+  }
+  tk.rect(x0, horizon, x1 - x0, 1, pal.seaLine);
+  // 波
+  for (let i = 0; i < 26; i++) {
+    const wy = horizon + 3 + ((i * 7) % (y1 - horizon - 4));
+    const wx = x0 + 3 + ((i * 53) % (x1 - x0 - 8));
+    tk.rect(wx, wy, 3 + (i % 3), 1, pal.seaHi, 0.5);
+  }
+  // 月と月の道
+  const mx = 262;
+  tk.ellipse(mx, y0 + 12, 7, 7, pal.moon);
+  tk.ellipse(mx - 1, y0 + 11, 5, 5, pal.moonHi);
+  for (let y = horizon + 1; y < y1 - 2; y += 2) {
+    const w = 2 + ((y - horizon) % 7);
+    tk.rect(mx - w + 2, y, w * 2, 1, pal.moonHi, 0.45);
+  }
+  // 窓枠
+  tk.rect(x0, y0, x1 - x0, 1, pal.frameHi);
+  tk.rect(x0, y1 - 1, x1 - x0, 1, pal.frame);
+  tk.rect(x0, y0, 2, y1 - y0, pal.frame);
+  tk.rect(x1 - 2, y0, 2, y1 - y0, pal.frame);
+  // 風になびくカーテン（白い布。裾が外へ流れ、海は右に見える）
+  for (let y = y0; y < y1 - 2; y++) {
+    const k = (y - y0) / (y1 - y0);
+    const right = x0 + 18 + Math.round(k * 16) + Math.round(Math.sin(k * 3.2) * 3);
+    tk.rect(x0 + 1, y, right - x0 - 1, 1, pal.curtain);
+    tk.rect(right - 3, y, 2, 1, pal.curtainShade, 0.85);
+    for (let i = 0; i < 3; i++) tk.rect(x0 + 5 + i * 7, y, 1, 1, i % 2 ? pal.curtainHi : pal.curtainShade, 0.55);
+  }
+  // 2枚目（奥・少し短い）
+  for (let y = y0 + 3; y < y1 - 8; y++) {
+    const k = (y - y0) / (y1 - y0);
+    const left = x0 + 30 + Math.round(Math.sin(k * 2.6 + 1) * 3);
+    tk.rect(left, y, 9 + Math.round(k * 6), 1, pal.curtain, 0.9);
+    tk.rect(left + 6, y, 2, 1, pal.curtainShade, 0.7);
+  }
+  tk.rect(x0 + 1, y0, 34, 2, pal.frameHi, 0.9);
+}
+
+function drawSeaSet(tk, pal) {
+  // 麦わら帽子
+  tk.ellipse(52, 34, 13, 5, pal.straw);
+  tk.ellipse(52, 30, 7, 5, pal.strawHi);
+  tk.rect(48, 26, 8, 2, pal.strawLo);
+  // 紙灯籠
+  const lx = 292, ly = 104;
+  tk.rect(lx, 84, 1, 20, pal.frame);
+  tk.round(lx - 9, ly, 19, 22, 4, pal.paperShade);
+  tk.round(lx - 8, ly + 1, 17, 20, 4, pal.paperLo);
+  tk.rect(lx - 8, ly + 8, 17, 1, pal.paperShade, 0.7);
+  tk.rect(lx - 8, ly + 14, 17, 1, pal.paperShade, 0.7);
+  tk.wash(lx - 22, ly - 14, lx + 24, ly + 34, pal.warm, (px, py) => clamp(1 - Math.hypot(px - lx, py - (ly + 10)) / 22, 0, 1) * 0.3);
+  // 貝がら
+  tk.ellipse(160, 88, 4, 2, pal.paper);
+  tk.ellipse(160, 87, 3, 1, pal.paperHi);
+}
+
+/** キャンプ：テントの内側。 */
+function drawTentWall(tk, pal) {
+  // 布の面（左右から中央の柱へ）
+  for (let y = 0; y < 92; y++) {
+    const k = y / 92;
+    tk.rect(0, y, W, 1, mix(pal.tentHi, pal.tent, k));
+  }
+  // 縫い目
+  for (const x of [40, 108, 176, 244]) tk.rect(x, 0, 1, 92, pal.tentSeam, 0.55);
+  // 天井の骨（A型）
+  tk.line(0, 18, 160, 2, pal.tentPole, 0.9);
+  tk.line(W, 18, 160, 2, pal.tentPole, 0.9);
+  tk.rect(157, 0, 5, 92, pal.tentPole, 0.25);
+  // メッシュの窓（星が見える）
+  const x0 = 190, y0 = 14, x1 = 246, y1 = 54;
+  tk.round(x0, y0, x1 - x0, y1 - y0, 3, pal.skyLo);
+  for (let i = 0; i < 16; i++) tk.put(x0 + 3 + ((i * 23) % (x1 - x0 - 6)), y0 + 3 + ((i * 31) % (y1 - y0 - 6)), pal.star, 0.9);
+  tk.ellipse(x1 - 12, y0 + 12, 4, 4, pal.moon);
+  for (let x = x0; x < x1; x += 3) tk.rect(x, y0, 1, y1 - y0, pal.tentSeam, 0.5);
+  for (let y = y0; y < y1; y += 3) tk.rect(x0, y, x1 - x0, 1, pal.tentSeam, 0.5);
+  tk.rect(x0 - 1, y0 - 1, x1 - x0 + 2, 1, pal.tentPole);
+  tk.rect(x0 - 1, y1, x1 - x0 + 2, 1, pal.tentPole);
+}
+
+function drawCampSet(tk, pal) {
+  // ランタン
+  const lx = 262;
+  tk.rect(lx, 0, 1, 12, pal.frame);
+  tk.round(lx - 7, 12, 15, 16, 2, pal.frame);
+  tk.round(lx - 5, 14, 11, 12, 2, pal.lampShade);
+  tk.rect(lx - 4, 17, 7, 7, pal.warm);
+  tk.wash(lx - 30, 8, lx + 32, 70, pal.warm, (px, py) => clamp(1 - Math.hypot(px - lx, py - 22) / 36, 0, 1) * 0.26);
+  // リュック
+  tk.round(272, 132, 34, 40, 4, pal.pack);
+  tk.round(276, 136, 26, 16, 3, pal.packHi);
+  tk.rect(286, 128, 8, 6, pal.packLo);
+  tk.rect(272, 148, 34, 2, pal.packLo);
+  // 寝袋のファスナー
+  for (let x = 60; x < 244; x += 6) tk.put(x, 158, pal.packLo, 0.3);
+}
+
+/** 蚊帳（最後の夜）。天井から下りる網を、布団の手前に薄く重ねる。
+ *  ここだけは焼き込み済みフレームではなく、毎フレームのペインタに描く（揺れるから）。 */
+function drawMosquitoNet(p, pal, t) {
+  const sway = Math.round(Math.sin(t * 0.6));
+  // 天井の吊り輪
+  p.ellipse(150, 12 + sway, 24, 3, pal.netRing, 0.3);
+  // 上部の幕（内側ほど明るい網）
+  const top = 14;
+  for (let y = top; y < top + 30; y++) {
+    const k = (y - top) / 30;
+    const half = Math.round(44 + k * 98);
+    const a = 0.05 + k * 0.12;
+    p.rect(150 - half, y, half * 2, 1, pal.net, 0.028 + k * 0.02);
+    if (y % 2 === 0) for (let x = 150 - half; x < 150 + half; x += 2) p.dot(x, y, pal.net, a);
+    if (y % 6 === 0) for (let x = 150 - half + 1; x < 150 + half; x += 6) p.dot(x, y + 1, pal.net, a * 0.7);
+  }
+  // 左右の幕（下へ広がる網）
+  for (const side of [0, 1]) {
+    for (let y = top + 22; y < 176; y++) {
+      const k = (y - (top + 22)) / 120;
+      const cx = side ? 210 + Math.round(k * 52) : 90 - Math.round(k * 52);
+      const a = 0.14 + k * 0.1;
+      p.rect(cx - 5, y, 10, 1, pal.net, 0.03 + k * 0.02);
+      if (y % 2 === 0) p.rect(cx - 3, y, 6, 1, pal.net, a * 0.7);
+      else p.dot(cx + (side ? 2 : -2), y, pal.net, a);
+      if (y % 7 === 0) p.dot(cx - (side ? 3 : -3), y + 1, pal.net, a);
+    }
+  }
+  // 裾のたまり（床）
+  for (let y = 170; y < 176; y += 2)
+    for (let x = 2; x < W; x += 3) p.dot(x, y, pal.net, 0.11);
+  // 吊り紐
+  p.rect(150, 0, 1, 12 + sway, pal.netRing, 0.5);
+}
+
+function drawMoonWindowBig(tk, pal) {
+  const x0 = 150, y0 = 4, x1 = 300, y1 = 70;
+  tk.round(x0 - 5, y0 - 5, x1 - x0 + 10, y1 - y0 + 10, 3, pal.frame);
+  tk.rect(x0, y0, x1 - x0, y1 - y0, pal.skyLo);
+  for (let y = y0; y < y1; y++) tk.rect(x0, y, x1 - x0, 1, mix(pal.skyHi, pal.skyLo, (y - y0) / (y1 - y0)));
+  const mx = 258, my = 22;
+  tk.wash(x0, y0, x1, y1, pal.moon, (x, y) => clamp(1 - Math.hypot(x - mx, (y - my) * 1.2) / 52, 0, 1) ** 2 * 0.32);
+  tk.ellipse(mx, my, 9, 9, pal.moon);
+  tk.ellipse(mx - 1, my - 1, 7, 7, pal.moonHi);
+  for (let i = 0; i < 22; i++) {
+    const sx = Math.round(x0 + 3 + frac(Math.sin(i * 12.9898) * 43758.5453) * (x1 - x0 - 6));
+    const sy = Math.round(y0 + 3 + frac(Math.sin(i * 78.233) * 12345.6789) * 40);
+    if (Math.hypot(sx - mx, sy - my) < 15) continue;
+    tk.put(sx, sy, i % 5 === 0 ? pal.starHi : pal.star, i % 3 === 0 ? 0.75 : 1);
+  }
+  tk.rect(x0, y0, x1 - x0, 1, pal.frameHi);
+  tk.rect(x0, y1 - 1, x1 - x0, 1, pal.frame);
+  tk.rect(x0 + (x1 - x0) / 2 - 1, y0, 2, y1 - y0, pal.frameHi, 0.7);
+}
+
+/** 子ども部屋：壁の星と玩具棚。 */
+function drawKidsWall(tk, pal, t = 0) {
+  // 星のシール（夜光）
+  const stars = [[36, 20], [64, 34], [96, 16], [124, 40], [150, 24], [58, 56], [110, 60], [142, 66], [24, 66], [84, 44]];
+  for (let i = 0; i < stars.length; i++) {
+    const [sx, sy] = stars[i];
+    const k = 0.5 + Math.sin(t * 0.8 + i) * 0.2;
+    tk.put(sx, sy, pal.starHi, k + 0.3);
+    tk.put(sx - 1, sy, pal.starHi, k * 0.6);
+    tk.put(sx + 1, sy, pal.starHi, k * 0.6);
+    tk.put(sx, sy - 1, pal.starHi, k * 0.6);
+    tk.put(sx, sy + 1, pal.starHi, k * 0.6);
+  }
+  // ロケットのポスター
+  const px = 176, py = 16;
+  tk.rect(px - 1, py - 1, 30, 34, pal.frame);
+  tk.rect(px, py, 28, 32, mix(pal.wainscotHi, pal.glass, 0.3));
+  for (let i = 0; i < 12; i++) tk.rect(px + i, py + 22 - i, 2, 2, pal.paper, 0.5);
+  tk.rect(px + 12, py + 4, 4, 20, pal.paperHi);
+  tk.rect(px + 13, py + 2, 2, 2, pal.warm);
+  tk.rect(px + 11, py + 24, 6, 2, pal.warm, 0.8);
+  // 玩具棚
+  tk.rect(244, 44, 74, 3, pal.frame);
+  tk.rect(244, 44, 74, 1, pal.frameHi);
+  tk.round(250, 32, 10, 12, 1, pal.toyA);   // ブロック
+  tk.round(262, 36, 8, 8, 1, pal.toyB);
+  tk.round(274, 30, 9, 14, 1, pal.toyC);
+  tk.ellipse(292, 40, 5, 5, pal.toyB);      // ボール
+  tk.ellipse(291, 38, 2, 2, pal.paper, 0.5);
+  // おもちゃ箱
+  tk.round(252, 132, 60, 34, 3, pal.toyA);
+  tk.rect(252, 132, 60, 3, pal.toyB);
+  tk.rect(276, 138, 12, 3, pal.frame);
+  // プラネタリウムの灯り（床）
+  tk.wash(276, 96, 320, 170, pal.warm, (px2, py2) => clamp(1 - Math.hypot(px2 - 300, py2 - 116) / 40, 0, 1) * 0.16);
+}
+
+function drawPlush(tk, pal) {
+  // 枕の横のぬいぐるみ（うさぎ）
+  const x = 100, y = 96;
+  tk.ellipse(x + 6, y + 10, 7, 6, pal.toyC);
+  tk.ellipse(x + 5, y + 9, 5, 4, pal.toyB, 0.75);
+  tk.ellipse(x + 6, y + 3, 5, 4, pal.toyC);
+  tk.rect(x + 3, y - 3, 2, 5, pal.toyC);
+  tk.rect(x + 8, y - 3, 2, 5, pal.toyC);
+  tk.put(x + 4, y + 2, pal.eye);
+  tk.put(x + 9, y + 2, pal.eye);
+  tk.put(x + 6, y + 4, pal.lip);
+}
+
+
+// ---------------------------------------------------------------- 7晩目まで（部屋の組み立て）
+const WHITE = () => toColor("#ffffff");
+const BLACK = () => toColor("#000000");
+const lt = (c, k) => mix(toColor(c), WHITE(), k);
+const dk = (c, k) => mix(toColor(c), BLACK(), k);
+
+/** 部屋の外殻（壁・腰板・床・枠）。細かい色は extra で上書きする。 */
+function shellPal(wallTop, wallBot, floorFar, floorNear, extra = {}) {
+  return {
+    wallTop, wallBot,
+    wainscot: lt(dk(floorFar, 0.1), 0.05),
+    wainscotHi: lt(floorNear, 0.06),
+    wainscotLo: dk(floorFar, 0.35),
+    floorFar, floorNear,
+    floorSeam: dk(floorFar, 0.3),
+    floorSeamHi: lt(floorNear, 0.1),
+    floorShadow: dk(floorFar, 0.45),
+    corner: "#05040a",
+    shadow: "#0a0710",
+    frame: lt(dk(floorFar, 0.15), 0.12),
+    frameHi: lt(floorNear, 0.22),
+    ...extra,
+  };
+}
+
+/** 寝具の3点（シーツ・枕・掛け布団）から明暗を機械的に作る。 */
+function beddingTone(sheetC, pillowC, blanketC, lip = "#a8747e") {
+  return {
+    sheet: sheetC,
+    sheetHi: lt(sheetC, 0.16),
+    sheetLo: dk(sheetC, 0.3),
+    sheetFold: lt(sheetC, 0.38),
+    sheetFoldLo: lt(sheetC, 0.22),
+    pillow: pillowC,
+    pillowHi: lt(pillowC, 0.2),
+    pillowLo: dk(pillowC, 0.28),
+    pillowDeep: dk(pillowC, 0.48),
+    lip,
+    blanket: blanketC,
+    blanketHi: lt(blanketC, 0.18),
+    blanketLo: dk(blanketC, 0.36),
+  };
+}
+
+/** 新しい部屋の共通部分。 */
+function roomWorld(cfg) {
+  const pal = cfg.pal;
+  pal.headRows = headFor(cfg.head ?? "short");
+  return {
+    spots: makeSpots(BED.head.cx, BED.head.cy),
+    inBeam,
+    surfaceY,
+    name: cfg.name,
+    jp: cfg.jp,
+    night: cfg.night,
+    bugs: cfg.bugs,
+    speed: cfg.speed,
+    spotBias: cfg.spotBias,
+    grace: cfg.grace,
+    pal,
+    frame: cfg.frame,
+    floor: cfg.floor,
+    label: cfg.label,
+    drawAmbient(p, t) {
+      cfg.ambient?.(p, t, pal);
+      drawMotes(p, t, cfg.mote ?? pal.paperHi, cfg.motes ?? 10);
+    },
+    drawOver(p, t) {
+      drawDuvet(p, t, pal);
+      cfg.over?.(p, t, pal);
+    },
+  };
+}
+
+/** 4晩目：子ども部屋。 */
+function buildKids(frame0) {
+  const frame = createFrame(W, H);
+  const tk = toolkit(frame);
+  const pal = basePal({
+    ...shellPal("#1a1630", "#120f22", "#241c2a", "#2f2436", {
+      wainscot: "#2a2148", wainscotHi: "#3a2f5e", wainscotLo: "#191334",
+      frame: "#3a2f5e", frameHi: "#54488a",
+      toyA: "#b8503f", toyB: "#3f7bb8", toyC: "#c9a24a",
+    }),
+    ...beddingTone("#5a5480", "#e8e2f0", "#7a4a86", "#c0707e"),
+    starHi: "#f2eaff",
+  });
+  drawRoom(tk, pal, { floor: "wood" });
+  drawKidsWall(tk, pal, 0);
+  drawPlush(tk, pal);
+  drawBedding(tk, pal);
+  return roomWorld({
+    frame, pal, floor: "wood", head: "kid", name: "KIDS", jp: "子ども部屋",
+    night: 45, bugs: 7, speed: 1.26, spotBias: 0.34, grace: 0.76, mote: pal.starHi, motes: 12,
+  });
+}
+
+/** 5晩目：ホテル。 */
+function buildHotel() {
+  const frame = createFrame(W, H);
+  const tk = toolkit(frame);
+  const pal = basePal({
+    ...shellPal("#171320", "#0f0c17", "#1e1620", "#2a1d26", {
+      wainscot: "#2b1f2c", wainscotHi: "#3d2c3b", wainscotLo: "#1b1220",
+      frame: "#3a2a33", frameHi: "#57404b",
+      wainscotLo2: "#1b1220",
+      curtain: "#33202c", curtainHi: "#472e3c",
+      skyHi: "#1b2340", skyLo: "#0c1126",
+      windowLight: "#ffd9a8", clockLed: "#e8483c",
+      lampShade: "#e8c48a", glassDark: "#33477a",
+    }),
+    ...beddingTone("#5d5064", "#efe7e2", "#6b3a46", "#b0766f"),
+  });
+  drawRoom(tk, pal, { floor: "carpet" });
+  drawCityWindow(tk, pal);
+  drawHotelSet(tk, pal);
+  drawBedding(tk, pal);
+  return roomWorld({
+    frame, pal, floor: "carpet", head: "short", name: "HOTEL", jp: "ホテル",
+    night: 45, bugs: 8, speed: 1.3, spotBias: 0.36, grace: 0.72, mote: pal.paperHi, motes: 8,
+  });
+}
+
+/** 6晩目：山小屋。 */
+function buildCabin() {
+  const frame = createFrame(W, H);
+  const tk = toolkit(frame);
+  const pal = basePal({
+    ...shellPal("#2a1c14", "#1b110c", "#2a1e16", "#3a2a1c", {
+      wainscot: "#3a2a1e", wainscotHi: "#4d3927", wainscotLo: "#241811",
+      frame: "#4a3524", frameHi: "#6b4d34",
+      stone: "#3c3630", stoneHi: "#4e4740", stoneLo: "#2a2520",
+      fire: "#c25a28", fireHi: "#ffb15c", fireLo: "#5c2210",
+      skyHi: "#1a2542", skyLo: "#0b1122",
+      snow: "#dfe6f2", snowHi: "#ffffff",
+    }),
+    ...beddingTone("#6b4a34", "#e6dcd0", "#8a3a2a", "#c08070"),
+  });
+  drawRoom(tk, pal, { floor: "wood" });
+  drawLogWall(tk, pal);
+  drawSnowWindow(tk, pal, 0);
+  drawFireplace(tk, pal, 0);
+  drawBedding(tk, pal);
+  return roomWorld({
+    frame, pal, floor: "wood", head: "beard", name: "CABIN", jp: "山小屋",
+    night: 45, bugs: 8, speed: 1.35, spotBias: 0.38, grace: 0.68,
+    mote: pal.fireHi, motes: 14,
+    // 炎がまたたく（暖炉の光）
+    over(p, t, pl) {
+      const q = hexPaint(p);
+      const k = 0.05 + Math.abs(Math.sin(t * 3.1)) * 0.08;
+      for (let y = 0; y < H; y++)
+        for (let x = 252; x < W; x++) q.put(x, y, pl.fireHi, k * 0.16);
+    },
+  });
+}
+
+/** 7晩目：夜行列車。 */
+function buildTrain() {
+  const frame = createFrame(W, H);
+  const tk = toolkit(frame);
+  const pal = basePal({
+    ...shellPal("#1b1a24", "#111017", "#241e22", "#2f272a", {
+      wainscot: "#2a2632", wainscotHi: "#3a3545", wainscotLo: "#191622",
+      wainscotLo2: "#191622",
+      frame: "#3d3a4a", frameHi: "#5a5670",
+      curtain: "#2a2a44", curtainHi: "#3c3c60",
+      skyHi: "#182444", skyLo: "#0a1020",
+      lampShade: "#e8c48a",
+    }),
+    ...beddingTone("#4e5468", "#dfe4ec", "#33405c", "#a0747c"),
+  });
+  drawRoom(tk, pal, { floor: "carpet" });
+  drawTrainWindow(tk, pal);
+  drawTrainSet(tk, pal);
+  drawBedding(tk, pal);
+  return roomWorld({
+    frame, pal, floor: "carpet", head: "long", name: "TRAIN", jp: "夜行列車",
+    night: 48, bugs: 8, speed: 1.4, spotBias: 0.4, grace: 0.65,
+    motes: 8,
+    // 窓の外を灯りが流れていく
+    ambient(p, t, pl) {
+      const q = hexPaint(p);
+      for (let i = 0; i < 5; i++) {
+        const x = 90 + ((t * (26 + i * 7) + i * 44) % 110);
+        const y = 42 + (i % 3) * 4;
+        q.put(208 - (x - 90), y, i % 2 ? pl.warm : pl.paper, 0.5);
+        q.put(208 - (x - 90) + 1, y, pl.warm, 0.3);
+      }
+    },
+  });
+}
+
+/** 8晩目：海辺の家。 */
+function buildSeaside() {
+  const frame = createFrame(W, H);
+  const tk = toolkit(frame);
+  const pal = basePal({
+    ...shellPal("#161d2c", "#0d1220", "#1d2422", "#28302a", {
+      wainscot: "#232c36", wainscotHi: "#33404d", wainscotLo: "#151b23",
+      frame: "#2f3a46", frameHi: "#4a5a68",
+      curtain: "#c8cbd8", curtainHi: "#eef0f6", curtainShade: "#8a90a4",
+      skyHi: "#243a5c", seaSky: "#3a5a7a",
+      seaFar: "#1c2c44", seaNear: "#12203a", seaLine: "#4a6a8a", seaHi: "#6a8aa8",
+      moon: "#e8eeff", moonHi: "#ffffff",
+      straw: "#c9a24a", strawHi: "#e0bd63", strawLo: "#8e6f2e",
+      paperLo: "#e8dcc8", paperShade: "#c8b89c",
+    }),
+    ...beddingTone("#5a6274", "#eef0f4", "#3a4c64", "#a87c80"),
+  });
+  drawRoom(tk, pal, { floor: "wood" });
+  drawSeaWindow(tk, pal);
+  drawSeaSet(tk, pal);
+  drawBedding(tk, pal);
+  return roomWorld({
+    frame, pal, floor: "wood", head: "short", name: "SEASIDE", jp: "海辺の家",
+    night: 48, bugs: 9, speed: 1.45, spotBias: 0.42, grace: 0.62, mote: pal.seaHi, motes: 12,
+  });
+}
+
+/** 9晩目：キャンプ（テントの中）。 */
+function buildCamp() {
+  const frame = createFrame(W, H);
+  const tk = toolkit(frame);
+  const pal = basePal({
+    ...shellPal("#243424", "#141f18", "#1e2418", "#2a3020", {
+      wainscot: "#2a3424", wainscotHi: "#3a4630", wainscotLo: "#16200f",
+      frame: "#3a3226", frameHi: "#574a36",
+      tent: "#2a3a2c", tentHi: "#3a4c38", tentSeam: "#182418", tentPole: "#5a4a36",
+      skyHi: "#1a2440", skyLo: "#0b1020", star: "#b9c6ee", moon: "#e8eeff",
+      lampShade: "#e8c48a", pack: "#4a3a2a", packHi: "#5e4a34", packLo: "#2e2418",
+    }),
+    ...beddingTone("#4a5240", "#e0e2d8", "#3c5a44", "#9c7a74"),
+  });
+  drawRoom(tk, pal, { floor: "dirt" });
+  drawTentWall(tk, pal);
+  drawCampSet(tk, pal);
+  drawBedding(tk, pal);
+  return roomWorld({
+    frame, pal, floor: "dirt", head: "cap", name: "CAMP", jp: "キャンプ",
+    night: 50, bugs: 9, speed: 1.5, spotBias: 0.44, grace: 0.59, mote: pal.star, motes: 14,
+  });
+}
+
+/** 10晩目：蚊帳の間（最後の夜）。 */
+function buildNet() {
+  const frame = createFrame(W, H);
+  const tk = toolkit(frame);
+  const pal = basePal({
+    ...shellPal("#171225", "#0e0b19", "#1b2118", "#262e20", {
+      wainscot: "#231d33", wainscotHi: "#332a48", wainscotLo: "#150f22",
+      frame: "#2f2740", frameHi: "#4a3f63",
+      skyHi: "#1d2a52", skyLo: "#0b1226",
+      moon: "#e8eeff", moonHi: "#ffffff", star: "#b9c6ee", starHi: "#ffffff",
+      net: "#c8c2dc", netRing: "#8a82a4",
+      paperLo: "#cfc6d6", paperShade: "#a9a0b4",
+    }),
+    ...beddingTone("#4e4860", "#f0ecf4", "#2f2a4a", "#a8787c"),
+  });
+  drawRoom(tk, pal, { floor: "tatami" });
+  drawMoonWindowBig(tk, pal);
+  drawBedding(tk, pal);
+  return roomWorld({
+    frame, pal, floor: "tatami", head: "grey", name: "NET", jp: "蚊帳の間",
+    night: 52, bugs: 10, speed: 1.55, spotBias: 0.46, grace: 0.56, mote: pal.starHi, motes: 16,
+    over(p, t, pl) {
+      drawMosquitoNet(p, pl, t);
+    },
+    // 蚊帳がかすかに揺れる
+    ambient(p, t, pl) {
+      const q = hexPaint(p);
+      const sway = Math.sin(t * 0.7) > 0 ? 1 : 0;
+      for (let y = 12; y < 170; y += 6) {
+        if ((y & 3) === 0) q.put(20 + sway, y, pl.net, 0.12);
+        q.put(W - 24 - sway, y, pl.net, 0.12);
+      }
+    },
+  });
+}
+
 // ---------------------------------------------------------------- ステージ定義
 /** パレットは数値に直してから使う（mix が数値を要求するため）。 */
 function basePal(over) {
@@ -835,7 +1540,10 @@ function buildWashitsu() {
     blanket: "#3d3554",
     blanketHi: "#544a70",
     blanketLo: "#282141",
+    hairGrey: "#6b6478",
+    hairGreyHi: "#8d869c",
   });
+  pal.headRows = headFor("short");
   drawRoom(tk, pal, { floor: "tatami" });
   drawTokonoma(tk, pal);
   drawShoji(tk, pal, { x0: 26, y0: 10, x1: 152, y1: 72 });
@@ -905,6 +1613,7 @@ function buildYoshitsu() {
     blanketHi: "#46587a",
     blanketLo: "#1f2a40",
   });
+  pal.headRows = headFor("cap");
   drawRoom(tk, pal, { floor: "wood" });
   drawPoster(tk, pal);
   drawBlinds(tk, pal);
@@ -986,6 +1695,7 @@ function buildNatsu() {
     blanketHi: "#5d6b96",
     blanketLo: "#2e3654",
   });
+  pal.headRows = headFor("long");
   drawRoom(tk, pal, { floor: "tatami" });
   drawNightWindow(tk, pal);
   drawSudare(tk, pal);
@@ -1003,7 +1713,7 @@ function buildNatsu() {
     bugs: 7,
     speed: 1.22,
     spotBias: 0.46,
-    grace: 0.74,
+    grace: 0.8,
     pal,
     frame,
     floor: "tatami",
@@ -1033,8 +1743,20 @@ function buildNatsu() {
   };
 }
 
-export const STAGES = [{ build: buildWashitsu }, { build: buildYoshitsu }, { build: buildNatsu }];
-export const STAGE_NAMES = ["TATAMI", "WESTERN", "SUMMER"];
+export const STAGES = [
+  { build: buildWashitsu },
+  { build: buildYoshitsu },
+  { build: buildNatsu },
+  { build: buildKids },
+  { build: buildHotel },
+  { build: buildCabin },
+  { build: buildTrain },
+  { build: buildSeaside },
+  { build: buildCamp },
+  { build: buildNet },
+];
+export const STAGE_NAMES = ["TATAMI", "WESTERN", "SUMMER", "KIDS", "HOTEL", "CABIN", "TRAIN", "SEASIDE", "CAMP", "NET"];
+export const STAGE_JP = ["和室", "洋室", "夏の夜", "子ども部屋", "ホテル", "山小屋", "夜行列車", "海辺の家", "キャンプ", "蚊帳の間"];
 
 const cache = new Map();
 /** ステージを1回だけ焼いて使い回す（毎回焼くと重い）。 */
