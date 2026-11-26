@@ -456,6 +456,34 @@ export function createGame({ seed = 3 } = {}) {
     g.principle = { name, t: dur };
   }
 
+  /** 蚊の入ってくる場所。夜が進むほど「右から」以外が増え、終盤は画面の中にも現れる。 */
+  function pickEntry() {
+    const k = g.stageIndex; // 0..9
+    const r = g.r;
+    const cand = [
+      // 右（1晩目から。最初はここだけ＝覚えやすい）
+      { wt: Math.max(0.12, 1 - k * 0.11), make: () => ({ x: 322, y: 20 + r() * 74, vx: -52, vy: (r() - 0.5) * 24 }) },
+      // 左
+      { wt: k >= 1 ? 0.1 + k * 0.045 : 0, make: () => ({ x: -4, y: 20 + r() * 74, vx: 52, vy: (r() - 0.5) * 24 }) },
+      // 上（天井から）
+      { wt: k >= 2 ? 0.1 + k * 0.04 : 0, make: () => ({ x: 26 + r() * 270, y: 4, vx: (r() - 0.5) * 30, vy: 48 }) },
+      // 下（足元の暗がりから）
+      { wt: k >= 3 ? 0.08 + k * 0.03 : 0, make: () => ({ x: 24 + r() * 270, y: 174, vx: (r() - 0.5) * 30, vy: -44 }) },
+      // 画面の中（どこからともなく）— 5晩目から
+      {
+        wt: k >= 4 ? 0.05 + (k - 4) * 0.05 : 0,
+        make: () => ({ x: 30 + r() * 260, y: 20 + r() * 70, vx: (r() - 0.5) * 70, vy: (r() - 0.5) * 40, popIn: true }),
+      },
+    ];
+    const total = cand.reduce((a, c) => a + c.wt, 0);
+    let roll = r() * total;
+    for (const c of cand) {
+      roll -= c.wt;
+      if (roll <= 0) return c.make();
+    }
+    return cand[0].make();
+  }
+
   function spawnBug() {
     const w = g.world;
     const n = g.kills + g.bites;
@@ -463,6 +491,7 @@ export function createGame({ seed = 3 } = {}) {
       seed: (g.seed * 7919 + 11 + g.bugId * 131 + g.stageIndex * 977) % 100000,
       speed: w.speed * (1 + Math.min(0.32, n * 0.04)),
       spotBias: Math.min(0.62, w.spotBias + n * 0.03),
+      entry: pickEntry(),
     });
     g.bugId++;
     g.bugs.push(bug);
@@ -599,7 +628,14 @@ export function createGame({ seed = 3 } = {}) {
       if (m.t > 0.25) { p.px(m.x, m.y + 1, C.splat); p.px(m.x + 1, m.y + 1, C.splat); }
     }
     drawSleeperBase(p, g.t, w.pal);
-    for (const b of g.bugs) drawMosquito(p, b, g.t, w);
+    for (const b of g.bugs) {
+      drawMosquito(p, b, g.t, w);
+      // 画面の中に現れた蚊だけ、出どころの輪をうっすら見せる
+      if (b.popIn && b.spawnT < 0.55) {
+        const k = b.spawnT / 0.55;
+        p.ring(b.x, b.y, 3 + k * 7, 1, C.textDim, (1 - k) * 0.45);
+      }
+    }
     g.fx.draw(frame, "back");
     g.fx.draw(frame, "front");
     // pixelfx のエフェクトは描画原点を place() したまま返すことがある。

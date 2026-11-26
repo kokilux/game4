@@ -7,12 +7,18 @@ import { lerp, clamp01, easeOutCubic, rng } from "./draw.js";
 
 // 着地候補はステージ側（world.spots）が持つ。kind:"skin" は刺される＝危険。
 
-const AIR = { x0: 16, x1: 304, y0: 22, y1: 92 };
+// 巡航する帯（壁のあたり）。出入りは画面のどこからでもよいので、移動の上限は画面全体。
+const BAND = { x0: 16, x1: 304, y0: 22, y1: 92 };
+const SCREEN = { x0: 6, x1: 314, y0: 8, y1: 172 };
 
-export function createMosquito({ seed = 1, speed = 1, spotBias = 0.35 } = {}) {
+export function createMosquito({ seed = 1, speed = 1, spotBias = 0.35, entry = null } = {}) {
   const r = rng(seed);
+  const e = entry ?? { x: 322, y: 40, vx: -40, vy: 0 };
   const m = {
-    x: 320, y: 40, vx: -40, vy: 0,
+    x: e.x ?? 320, y: e.y ?? 40, vx: e.vx ?? -40, vy: e.vy ?? 0,
+    zone: SCREEN,
+    popIn: !!e.popIn,      // 画面の中に現れた（予告の輪を出す）
+    spawnT: 0,
     state: "fly",
     t: 0,
     timer: 1.6 + r() * 1.6, // 着地を試みるまでの時間
@@ -54,17 +60,19 @@ export function updateMosquito(m, dt, ctx) {
   const { player, t, world } = ctx;
   let event = null;
   m.t += dt;
+  if (m.spawnT < 1) m.spawnT += dt;
   m.wing += dt * (m.state === "land" ? 6 : 46);
 
   // プレイヤーの手が近いと怯えて逃げる（飛んでいるときだけ）
   const dpx = m.x - player.x, dpy = m.y - player.y;
   const near = dpx * dpx + dpy * dpy < 30 * 30;
 
+  const Z = m.zone ?? SCREEN;
   if (m.state === "fly") {
     // ゆらゆら飛ぶ：目標点へ向かう舵 + 上下の揺れ
     if (m.t > m.nextTurn) {
-      m.homeX = lerp(AIR.x0, AIR.x1, 0.1 + m.r() * 0.8);
-      m.homeY = lerp(AIR.y0, AIR.y1, 0.1 + m.r() * 0.9);
+      m.homeX = lerp(BAND.x0, BAND.x1, 0.1 + m.r() * 0.8);
+      m.homeY = lerp(BAND.y0, BAND.y1, 0.1 + m.r() * 0.9);
       m.nextTurn = m.t + 1.2 + m.r() * 1.6;
     }
     const ang = Math.atan2(m.homeY - m.y, m.homeX - m.x);
@@ -83,10 +91,10 @@ export function updateMosquito(m, dt, ctx) {
     if (sp > maxSp) { m.vx = (m.vx / sp) * maxSp; m.vy = (m.vy / sp) * maxSp; }
     m.x += m.vx * dt; m.y += m.vy * dt;
     // 画面内に押し戻す
-    if (m.x < AIR.x0) { m.x = AIR.x0; m.vx = Math.abs(m.vx); }
-    if (m.x > AIR.x1) { m.x = AIR.x1; m.vx = -Math.abs(m.vx); }
-    if (m.y < AIR.y0) { m.y = AIR.y0; m.vy = Math.abs(m.vy); }
-    if (m.y > AIR.y1) { m.y = AIR.y1; m.vy = -Math.abs(m.vy); }
+    if (m.x < Z.x0) { m.x = Z.x0; m.vx = Math.abs(m.vx); }
+    if (m.x > Z.x1) { m.x = Z.x1; m.vx = -Math.abs(m.vx); }
+    if (m.y < Z.y0) { m.y = Z.y0; m.vy = Math.abs(m.vy); }
+    if (m.y > Z.y1) { m.y = Z.y1; m.vy = -Math.abs(m.vy); }
 
     if (m.timer - m.t < 0.45 && !m.picked) {
       // 着地の予告：狙いを決めて、羽音が高くなる
@@ -101,9 +109,12 @@ export function updateMosquito(m, dt, ctx) {
       m.fromX = m.x; m.fromY = m.y;
       m.hoverX = m.spot.x + (m.r() - 0.5) * 3;
       m.hoverY = m.spot.y - 7;
+      // 遠くから来たときは、そのぶん長く飛ぶ（ワープに見せない）
+      const dist = Math.hypot(m.hoverX - m.fromX, m.hoverY - m.fromY);
+      m.approachDur = Math.max(0.55, Math.min(1.15, dist / 260));
     }
   } else if (m.state === "approach") {
-    const p = clamp01(m.t / 0.55);
+    const p = clamp01(m.t / (m.approachDur ?? 0.55));
     const e = easeOutCubic(p);
     m.x = lerp(m.fromX, m.hoverX, e) + Math.sin(m.t * 22) * 0.6 * (1 - e);
     m.y = lerp(m.fromY, m.hoverY, e);
@@ -147,8 +158,8 @@ export function updateMosquito(m, dt, ctx) {
       m.nextTurn = m.t + 0.6;
       m.spot = null;
     }
-    m.x = Math.max(AIR.x0, Math.min(AIR.x1, m.x));
-    m.y = Math.max(AIR.y0, Math.min(AIR.y1, m.y));
+    m.x = Math.max(Z.x0, Math.min(Z.x1, m.x));
+    m.y = Math.max(Z.y0, Math.min(Z.y1, m.y));
   }
   return event;
 }
@@ -161,7 +172,7 @@ function startEscape(m) {
   m.state = "escape";
   m.t = 0;
   const ax = m.x + (m.r() - 0.5) * 90;
-  const ay = Math.max(AIR.y0, m.y - 26 - m.r() * 20);
+  const ay = Math.max(BAND.y0, m.y - 26 - m.r() * 20);
   const d = Math.hypot(ax - m.x, ay - m.y) || 1;
   m.vx = ((ax - m.x) / d) * 150 * m.speed;
   m.vy = ((ay - m.y) / d) * 150 * m.speed;
